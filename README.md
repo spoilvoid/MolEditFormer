@@ -1,0 +1,5 @@
+# Mol-Align 
+1.molecule_edit_utils.py需要修改load_molecule_models与load_language_molecule_and_edit_models  
+2.modality_adapter_train.py需要修改get_molecule_repr_generation与save_model  
+3.molecule_edit.py需要同步更改argparse与load_language_molecule_and_edit_models  
+必要时可以直接注释掉暂时不用的部分  
