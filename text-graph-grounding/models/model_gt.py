@@ -2,6 +2,7 @@ from collections import OrderedDict
 from typing import Tuple, Union
 
 import os
+import os.path as osp
 import numpy as np
 import torch
 import torch.nn as nn
@@ -110,8 +111,8 @@ class CLIP(nn.Module):
                 num_tasks=1,
                 molecule_node_model=self.molecule_node_model)
             
-            pretrained_graph_path = os.path.join(args.graph_pretrain_folder, args.pretrain_gnn_mode, "model.pth")
-            self.gnn.from_pretrained(pretrained_graph_path)
+            pretrained_graph_path = osp.join(args.graph_pretrain_dir, args.pretrain_gnn_mode, "model.pth")
+            self.molecule_model.from_pretrained(pretrained_graph_path)
 
         if args.molecule_type == "3DGraph" or args.molecule_type == "all":
             pass
@@ -119,9 +120,10 @@ class CLIP(nn.Module):
             pass
 
         # load text branch
+        self.max_seq_len = args.max_seq_len
         self.text_dim = args.text_emb_dim
-        self.text_tokenizer = AutoTokenizer.from_pretrained(args.text_pretrain_folder)
-        self.text_model = AutoModel.from_pretrained(args.text_pretrain_folder)
+        self.text_tokenizer = AutoTokenizer.from_pretrained(args.text_pretrain_dir)
+        self.text_model = AutoModel.from_pretrained(args.text_pretrain_dir)
         
         # load projector
         self.text2latent = nn.Linear(self.text_dim, args.SSL_emb_dim)
@@ -165,21 +167,21 @@ class CLIP(nn.Module):
     #     if self.text_projection is not None:
     #         nn.init.normal_(self.text_projection, std=self.transformer.width ** -0.5)
 
-    def build_attention_mask(self):
-        # lazily create causal attention mask, with full attention between the vision tokens
-        # pytorch uses additive attention mask; fill with -inf
-        mask = torch.empty(self.context_length, self.context_length)
-        mask.fill_(float("-inf"))
-        mask.triu_(1)  # zero out the lower diagonal
-        return mask
+    # def build_attention_mask(self):
+    #     # lazily create causal attention mask, with full attention between the vision tokens
+    #     # pytorch uses additive attention mask; fill with -inf
+    #     mask = torch.empty(self.context_length, self.context_length)
+    #     mask.fill_(float("-inf"))
+    #     mask.triu_(1)  # zero out the lower diagonal
+    #     return mask
 
     def preprocess_each_sentence(self, sentence, tokenizer, max_seq_len):
         text_input = tokenizer(
             sentence, truncation=True, max_length=max_seq_len,
             padding='max_length', return_tensors='np')
-
+        # print(text_input)
         input_ids = text_input['input_ids'].squeeze()
-        attention_mask = text_input[' '].squeeze()
+        attention_mask = text_input['attention_mask'].squeeze()
 
         sentence_tokens_ids = padarray(input_ids, max_seq_len)
         sentence_masks = padarray(attention_mask, max_seq_len)
@@ -195,7 +197,7 @@ class CLIP(nn.Module):
         return tokens_ids, masks
 
     def encode_graph(self, molecule_data):
-        molecule_repr, _ = self.gnn(molecule_data)
+        molecule_repr, _ = self.molecule_model(molecule_data)
         molecule_repr = self.mol2latent(molecule_repr)
         # embs = self.gnn(g)
         # idx_train = idx_train.to(embs.device)
@@ -203,32 +205,31 @@ class CLIP(nn.Module):
         # train_embs = embs[idx_train]
         return molecule_repr
 
-    def encode_text(self, text):
-        x = self.token_embedding(text)  # [batch_size, n_ctx, d_model]
+    # def encode_text(self, text):
+    #     x = self.token_embedding(text)  # [batch_size, n_ctx, d_model]
 
-        x = x + self.positional_embedding
-        x = x.permute(
-            1, 0, 2
-        )  # NLD -> LND, batch_size * context_length *emb_dim -> context_length * batch_size  *emb_dim
-        x = self.transformer(x)
-        x = x.permute(
-            1, 0, 2
-        )  # LND -> NLD, context_length * batch_size *emb_dim -> batch_size * context_length *emb_dim
-        x = self.ln_final(x)
-        # x.shape = [batch_size, n_ctx, transformer.width]
-        # take features from the eot （end of token） embedding (eot_token is the highest number in each sequence)
-        # so there is node need to shorten the context length
-        x = x[torch.arange(x.shape[0]), text.argmax(dim=-1)]  #
-        x = x @ self.text_projection
-        return x
+    #     x = x + self.positional_embedding
+    #     x = x.permute(
+    #         1, 0, 2
+    #     )  # NLD -> LND, batch_size * context_length *emb_dim -> context_length * batch_size  *emb_dim
+    #     x = self.transformer(x)
+    #     x = x.permute(
+    #         1, 0, 2
+    #     )  # LND -> NLD, context_length * batch_size *emb_dim -> batch_size * context_length *emb_dim
+    #     x = self.ln_final(x)
+    #     # x.shape = [batch_size, n_ctx, transformer.width]
+    #     # take features from the eot （end of token） embedding (eot_token is the highest number in each sequence)
+    #     # so there is node need to shorten the context length
+    #     x = x[torch.arange(x.shape[0]), text.argmax(dim=-1)]  #
+    #     x = x @ self.text_projection
+    #     return x
 
     def encode_text_from_pretrain_model(self, text, text_tokenizer, device):
-
         description_tokens_ids, description_masks = self.prepare_text_tokens(
             device,
             description=text,
             tokenizer=text_tokenizer,
-            max_seq_len=self.args.max_seq_len
+            max_seq_len=self.max_seq_len
         )
         description_output = self.text_model(input_ids=description_tokens_ids, attention_mask=description_masks)
         description_repr = description_output["pooler_output"]
@@ -255,6 +256,20 @@ class CLIP(nn.Module):
         return s_image_features, text_features
 
         # return s_image_features, s_text_features, t_text_features, labels
+
+    def save_model(self, save_dir, prefix="", config=None):
+        if not osp.exists(save_dir):
+            os.makedirs(save_dir)
+        if config is None or not isinstance(config, dict):
+            print("Please provide the config file for saving the model")
+            return
+        for key, value in config.items():
+            if value:
+                model_branch = getattr(self, key, None)
+                if model_branch is None:
+                    print(f"Model branch {key} does not exist")
+                    continue
+                torch.save(model_branch.state_dict(), osp.join(save_dir, f"{prefix}_{key}.pth"))
 
 
 def tokenize(texts: Union[str, List[str]], context_length: int = 128, truncate: bool = True) -> torch.LongTensor:

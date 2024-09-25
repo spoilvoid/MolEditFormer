@@ -92,6 +92,7 @@ def get_local_time():
 
 class Logger(object):
     def __init__(self, save_dir, time_log, log_name='train_logger'):
+        print(f"initialize Logger file in {save_dir}")
         if not osp.exists(save_dir):
             os.makedirs(save_dir)
 

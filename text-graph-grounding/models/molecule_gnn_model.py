@@ -179,7 +179,7 @@ class GNN_graphpred(nn.Module):
         return
 
     def from_pretrained(self, model_file):
-        print("Loading from {} ...".format(model_file))
+        print("Loading GNN_graphpred pretrain weight from {} ...".format(model_file))
         state_dict = torch.load(model_file)
         self.molecule_node_model.load_state_dict(state_dict)
         return

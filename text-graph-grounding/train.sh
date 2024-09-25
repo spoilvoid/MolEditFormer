@@ -1,4 +1,12 @@
-export CUDA_VISIBLE_DEVICES=0; python3 main_train.py \
---data_name=woshi \
---batch_size=64 \
---epoch_num=2
+python3 pretrain.py \
+    --molecule_type 2DGraph \
+    --gnn_type gin \
+    --pretrain_gnn_mode GraphMVP_G \
+    --no_repr_frozen \
+    --text_pretrain_dir ckpt/SciBERT \
+    --graph_pretrain_dir ckpt/GraphMVP \
+    --data_dir data/PubChemEdit \
+    --batch_size 32 \
+    --epoch_num 20 \
+    --seed 42 \
+    --gpu 1

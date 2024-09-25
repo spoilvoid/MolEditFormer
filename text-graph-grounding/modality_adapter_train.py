@@ -1,5 +1,7 @@
 import argparse
 import os
+import os.path as osp
+import sys
 import numpy as np
 from tqdm import tqdm
 import time
@@ -12,58 +14,84 @@ from torch.utils.data import DataLoader as torch_DataLoader
 from torch_geometric.loader import DataLoader as pyg_DataLoader
 
 from basic_utils import get_mol_to_joint_latent, freeze_network
-from .models import MLP
-from molecule_edit_utils import load_molecule_models
-from .datasets import PubChemEdit
+from models import MegaMolBART, MLP
+from molecule_edit_utils import load_CLIP_graph_branch
+from datasets import ZINC250K_Graph
+
+from basic_utils import Logger, seed_all
 
 
 def cycle_index(num, shift):
+    '''
+    num, shift: int
+    num > shift > 0
+    return [shift, shift+1, ..., num-1, 0, 1, ..., shift-1]
+    '''
     arr = torch.arange(num) + shift
     arr[-shift:] = torch.arange(shift)
     return arr
 
 
-def do_CL(X, Y, args):
+def cal_cl_loss(s_features, t_features, labels):
+    logit_scale = nn.Parameter(torch.ones([]) * np.log(1 / 0.07)).exp()
+    logits = logit_scale * s_features @ t_features.t()
+    loss_i = F.cross_entropy(logits, labels)
+    loss_t = F.cross_entropy(logits.T, labels)
+    ret_loss = (loss_i + loss_t) / 2
+    return ret_loss
+
+
+def cl_loss(s_features, t_features, args):
+    '''
+    s_features [batch_size, SSL_emb_dim]: molecular features 
+    t_features [batch_size, SSL_emb_dim]: description text features 
+    '''
     if args.normalize:
-        X = F.normalize(X, dim=-1)
-        Y = F.normalize(Y, dim=-1)
+        X = F.normalize(s_features, dim=-1)
+        Y = F.normalize(t_features, dim=-1)
 
     if args.SSL_loss == 'EBM_NCE':
         criterion = nn.BCEWithLogitsLoss()
+        # use cycle_index to form k negative samples
         neg_Y = torch.cat([Y[cycle_index(len(Y), i + 1)] for i in range(args.CL_neg_samples)], dim=0)
         neg_X = X.repeat((args.CL_neg_samples, 1))
 
+        # calculate the cosine similarity for each sample
         pred_pos = torch.sum(X * Y, dim=1) / args.T
         pred_neg = torch.sum(neg_X * neg_Y, dim=1) / args.T
 
+        # calculate the contrastive learning loss according to the weighted sum
         loss_pos = criterion(pred_pos, torch.ones(len(pred_pos)).to(pred_pos.device))
         loss_neg = criterion(pred_neg, torch.zeros(len(pred_neg)).to(pred_neg.device))
-        SSL_loss = (loss_pos + args.CL_neg_samples * loss_neg) / (1 + args.CL_neg_samples)
+        CL_loss = (loss_pos + args.CL_neg_samples * loss_neg) / (1 + args.CL_neg_samples)
 
-        SSL_acc = (torch.sum(pred_pos > 0).float() + torch.sum(pred_neg < 0).float()) / \
-                (len(pred_pos) + len(pred_neg))
-        SSL_acc = SSL_acc.detach().cpu().item()
-        
+        # calculate the contrastive learning accuracy(pred_pos > 0 and pred_neg < 0)
+        CL_acc = (torch.sum(pred_pos > 0).float() + torch.sum(pred_neg < 0).float()) / \
+                 (len(pred_pos) + len(pred_neg))
+        CL_acc = CL_acc.detach().cpu().item()
+
     elif args.SSL_loss == 'InfoNCE':
         criterion = nn.CrossEntropyLoss()
+        # suppose data in mini_batch should own different labels
         B = X.size()[0]
+        # calculate logits by integrating text and structure features for each sample
         logits = torch.mm(X, Y.transpose(1, 0))  # B*B
         logits = torch.div(logits, args.T)
         labels = torch.arange(B).long().to(logits.device)  # B*1
 
-        SSL_loss = criterion(logits, labels)
+        CL_loss = criterion(logits, labels)
         pred = logits.argmax(dim=1, keepdim=False)
-        SSL_acc = pred.eq(labels).sum().detach().cpu().item() * 1. / B
-    
+        CL_acc = pred.eq(labels).sum().detach().cpu().item() * 1. / B
+
     elif args.SSL_loss == 'RR':
         criterion = nn.MSELoss()
-        SSL_loss = criterion(X, Y)
-        SSL_acc = 0
+        CL_loss = criterion(X, Y)
+        CL_acc = 0
 
     else:
         raise Exception
 
-    return SSL_loss, SSL_acc
+    return CL_loss, CL_acc
 
 
 def mean_pooling(token_embeddings, attention_mask):
@@ -104,7 +132,52 @@ def save_model(save_best, epoch=None):
     return
 
 
-def train(epoch):
+def main(args):
+    seed_all(args.seed)
+    device = torch.device("cuda:{}".format(args.gpu) if torch.cuda.is_available() else "cpu")
+    print("device:", device)
+
+    # load model
+    if args.generation_model == "MegaMolBART":
+        MegaMolBART_wrapper = MegaMolBART(vocab_path=args.vocab_path, input_dir=args.MegaMolBART_generation_model_dir, output_dir=None)
+        print("Loading from pretrained MegaMolBART ({}).".format(args.MegaMolBART_generation_model_dir))
+        generation_model_dim = 256
+    else:
+        raise NotImplementedError
+    
+    graph_branch, graph_projector = load_CLIP_graph_branch(args)
+    graph_branch_dim = args.gnn_emb_dim
+
+    MegaMolBART_wrapper = MegaMolBART_wrapper.to(device)
+    graph_branch = graph_branch.to(device)
+    graph_projector = graph_projector.to(device)
+    freeze_network(MegaMolBART_wrapper.model)
+    freeze_network(graph_branch)
+    freeze_network(graph_projector)
+    MegaMolBART_wrapper.model.eval()
+    graph_branch.eval()
+    graph_projector.eval()
+
+    # load dataset
+    dataset = ZINC250K_Graph(args.data_dir)
+    dataloader = pyg_DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
+
+    graph_branch_dim = args.gnn_emb_dim
+    gen2joint_projector = MLP(generation_model_dim, [graph_branch_dim, graph_branch_dim]).to(device)
+    joint2gen_projector = MLP(graph_branch_dim, [generation_model_dim, generation_model_dim]).to(device)
+
+    model_param_group = [
+        {"params": gen2joint_projector.parameters(), "lr": args.gen2joint_lr},
+        {"params": joint2gen_projector.parameters(), "lr": args.joint2gen_lr},
+    ]
+    optimizer = optim.Adam(model_param_group, weight_decay=args.decay)
+    optimal_loss = 1e10
+    
+    for e in range(1, args.epochs+1):
+        print("Epoch {}".format(e))
+        train(e)
+
+
     if args.verbose:
         L = tqdm(dataloader)
     else:
@@ -169,113 +242,60 @@ def train(epoch):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--device", type=int, default=0)
-    parser.add_argument("--verbose", type=int, default=1)
-    parser.add_argument("--dataspace_path", type=str, default="../data")
-    parser.add_argument("--dataset", type=str, default="ZINC250K")
-    parser.add_argument("--MoleculeSTM_molecule_type", type=str, default="SMILES", choices=["SMILES", "Graph"])
-    parser.add_argument("--output_model_dir", type=str, default=None)
-
-    ########## for MoleculeSTM ##########
-    parser.add_argument("--MoleculeSTM_model_dir", type=str, default="../../pretrained_model")
-    parser.add_argument("--SSL_emb_dim", type=int, default=256)
-    ########## for 2D GNN ##########
-    parser.add_argument("--gnn_emb_dim", type=int, default=300)
-    parser.add_argument("--num_layer", type=int, default=5)
-    parser.add_argument('--JK', type=str, default='last')
-    parser.add_argument("--dropout_ratio", type=float, default=0.5)
-    parser.add_argument("--gnn_type", type=str, default="gin")
-    parser.add_argument('--graph_pooling', type=str, default='mean')
-
-    ########## for generation ##########
-    parser.add_argument('--generation_model', type=str, default="MegaMolBART", choices=["MegaMolBART"])
-
-    ######### for MegaMolBART ##########
-    parser.add_argument("--MegaMolBART_generation_model_dir", type=str, default="../data/pretrained_MegaMolBART/checkpoints")
-    parser.add_argument("--vocab_path", type=str, default="../MoleculeSTM/bart_vocab.txt")
-
-    ########## for optimization ##########
+    # log config
+    parser.add_argument("--time_log", type=bool, default=True)
+    parser.add_argument("--log_freq", type=int, default=1000)
+    # dataset config
+    parser.add_argument("--data_dir", type=str, default="data/ZINC250k")
+    # dataloader config
     parser.add_argument("--batch_size", type=int, default=256)
     parser.add_argument("--num_workers", type=int, default=8)
-    parser.add_argument("--epochs", type=int, default=100)
-    parser.add_argument("--decay", type=float, default=0)
-    parser.add_argument("--generation_lr", type=float, default=1e-2)
-    parser.add_argument("--MoleculeSTM_lr", type=float, default=1e-2) # optimal: 1e-2 or 1e-3
-    parser.add_argument("--T", type=float, default=0.1)
-    parser.add_argument("--SSL_loss", type=str, default="RR", choices=["EBM_NCE", "InfoNCE", "RR"])
+    # train config
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--gpu", type=int, default=1)
+    parser.add_argument("--epoch_num", type=int, default=100, help="epoch number")
+    parser.add_argument("--gen2joint_lr", type=float, default=1e-4)
+    parser.add_argument("--joint2gen_lr", type=float, default=1e-4)
+    parser.add_argument("--weight_decay", type=float, default=0)
+    # model config
+    parser.add_argument("--molecule_type", type=str, default="2DGraph", choices=["2DGraph", "3DGraph", "SMILES", "all"])
+    parser.add_argument("--repr_frozen", dest='repr_frozen', action='store_true')
+    parser.add_argument('--no_repr_frozen', dest='repr_frozen', action='store_false')
+    parser.set_defaults(repr_frozen=False)
+    # fixed generation model config
+    parser.add_argument('--generation_model', type=str, default="MegaMolBART", choices=["MegaMolBART"])
+    parser.add_argument("--vocab_path", type=str, default="bart_vocab.txt")
+    # graph branch config
+    parser.add_argument("--gnn_type", type=str, default="gin")
+    parser.add_argument("--num_layer", type=int, default=5)
+    parser.add_argument("--gnn_emb_dim", type=int, default=300)
+    parser.add_argument('--JK', type=str, default='last')
+    parser.add_argument("--dropout_ratio", type=float, default=0.5)
+    parser.add_argument('--graph_pooling', type=str, default='mean')
+    parser.add_argument("--pretrain_gnn_mode", type=str, default="GraphMVP_G", choices=["GraphMVP_G", "GraphMVP_C"])
+    # projector config
+    parser.add_argument("--SSL_emb_dim", type=int, default=256)
+    # load config
+    parser.add_argument("--generation_model_dir", type=str, default="ckpt/MegaMolBART/checkpoints")
+    parser.add_argument('--graph_model_path', type=str, default='ckpt/GraphMVP')
+    parser.add_argument('--graph_projector_path', type=str, default='ckpt/GraphMVP')
+    # save config
+    parser.add_argument("--store_dir", type=str, default="ckpt/mol_align")
+    parser.add_argument("--loss_threshold", type=float, default=sys.maxsize)
+    parser.add_argument("--save_freq", type=int, default=4000)
+    # contrastive SSL config
+    parser.add_argument("--SSL_loss", type=str, default="EBM_NCE", choices=["EBM_NCE", "InfoNCE", "MSELoss"])
     parser.add_argument("--CL_neg_samples", type=int, default=1)
-    parser.add_argument('--use_normalize', dest='normalize', action='store_true')
+    parser.add_argument("--T", type=float, default=0.1)
+    parser.add_argument('--normalize', dest='normalize', action='store_true')
     parser.add_argument('--no_normalize', dest='normalize', action='store_false')
-    parser.set_defaults(normalize=False)
+    parser.set_defaults(normalize=True)
 
     args = parser.parse_args()
     print(args)
+
+    start = time.perf_counter()
+    main(args)
     
-    if args.generation_model == "MegaMolBART":
-        if args.MoleculeSTM_molecule_type == "SMILES":
-            if args.dataset == "ZINC250K":
-                dataset_root = os.path.join(args.dataspace_path, "ZINC250K_data")
-                dataset = ZINC250K_Dataset_SMILES(dataset_root)
-            elif args.dataset == "ZINC250K1K":
-                dataset_root = os.path.join(args.dataspace_path, "ZINC250K_data")
-                dataset = ZINC250K_Dataset_SMILES(dataset_root, 1000)
-            elif args.dataset == "ZINC250K10K":
-                dataset_root = os.path.join(args.dataspace_path, "ZINC250K_data")
-                dataset = ZINC250K_Dataset_SMILES(dataset_root, 10000)
-            else:
-                raise Exception
-            dataloader_class = torch_DataLoader
-        else:
-            if args.dataset == "ZINC250K":
-                dataset_root = os.path.join(args.dataspace_path, "ZINC250K_data")
-                dataset = ZINC250K_Dataset_Graph(dataset_root)
-            elif args.dataset == "ZINC250K1K":
-                dataset_root = os.path.join(args.dataspace_path, "ZINC250K_data")
-                dataset = ZINC250K_Dataset_Graph(dataset_root, 1000)
-            elif args.dataset == "ZINC250K10K":
-                dataset_root = os.path.join(args.dataspace_path, "ZINC250K_data")
-                dataset = ZINC250K_Dataset_Graph(dataset_root, 10000)
-            else:
-                raise Exception
-            dataloader_class = pyg_DataLoader
-    else:
-        raise NotImplementedError
-
-    MegaMolBART_wrapper, molecule_model_generation, molecule_dim_generation, \
-        molecule_model_MoleculeSTM, mol2latent_MoleculeSTM, molecule_dim_MoleculeSTM = load_molecule_models(args)
-    device = torch.device("cuda:" + str(args.device)) \
-        if torch.cuda.is_available() else torch.device("cpu")
-    molecule_model_generation = molecule_model_generation.to(device)
-    molecule_model_MoleculeSTM = molecule_model_MoleculeSTM.to(device)
-    mol2latent_MoleculeSTM = mol2latent_MoleculeSTM.to(device)
-
-    np.random.seed(args.seed)
-    torch.random.manual_seed(args.seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(args.seed)
-    device = torch.device("cuda:" + str(args.device)) \
-        if torch.cuda.is_available() else torch.device("cpu")
-
-    freeze_network(molecule_model_generation)
-    freeze_network(mol2latent_MoleculeSTM)
-    freeze_network(molecule_model_MoleculeSTM)
-    molecule_model_generation.eval()
-    mol2latent_MoleculeSTM.eval()
-    molecule_model_MoleculeSTM.eval()
-    
-    dataloader = dataloader_class(dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
-
-    generation2MoleculeSTM = MLP(molecule_dim_generation, [molecule_dim_MoleculeSTM, molecule_dim_MoleculeSTM]).to(device)
-    MoleculeSTM2generation = MLP(molecule_dim_MoleculeSTM, [molecule_dim_generation, molecule_dim_generation]).to(device)
-
-    model_param_group = [
-        {"params": generation2MoleculeSTM.parameters(), "lr": args.generation_lr},
-        {"params": MoleculeSTM2generation.parameters(), "lr": args.MoleculeSTM_lr},
-    ]
-    optimizer = optim.Adam(model_param_group, weight_decay=args.decay)
-    optimal_loss = 1e10
-    
-    for e in range(1, args.epochs+1):
-        print("Epoch {}".format(e))
-        train(e)
+    end = time.perf_counter()
+    print("time consuming {:.2f}".format(end - start))

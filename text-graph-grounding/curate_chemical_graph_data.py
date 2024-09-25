@@ -4,7 +4,7 @@ from rdkit import Chem
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
-from graph_utils import mol_to_graph_data_obj_simple
+from datasets.dataset_utils import mol_to_graph_data_obj_simple
 
 
 def parse_csv(data_path):

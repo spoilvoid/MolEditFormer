@@ -3,7 +3,7 @@ import os
 from configparser import RawConfigParser
 from io import StringIO
 
-from MoleculeSTM.cuchemcommon.utils.singleton import Singleton
+from cuchemcommon.utils.singleton import Singleton
 
 logger = logging.getLogger(__name__)
 

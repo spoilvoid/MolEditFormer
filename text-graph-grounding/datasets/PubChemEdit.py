@@ -5,7 +5,6 @@ import pandas as pd
 from itertools import repeat
 from tqdm.auto import tqdm
 
-
 import rdkit
 from rdkit import Chem
 
@@ -70,7 +69,7 @@ class PubChemEdit(InMemoryDataset):
         suppl = Chem.ForwardSDMolSupplier(gzip_loader)
 
         graph_list = []
-        for mol in tqdm(suppl):
+        for mol in tqdm(suppl, total=len(self.description_list)):
             graph = dataset_utils.mol_to_graph_data_obj_simple(mol)
             graph_list.append(graph)
 

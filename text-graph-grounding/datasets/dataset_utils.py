@@ -3,7 +3,7 @@ import numpy as np
 import torch
 from rdkit import Chem
 from torch_geometric.data import Data
-from ogb.utils.features import atom_to_feature_vector, bond_to_feature_vector
+from ogb.utils.features import atom_to_feature_vector, bond_to_feature_vector, allowable_features
 
 
 def mol_to_graph_data_obj_simple(mol):

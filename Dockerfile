@@ -3,7 +3,7 @@ FROM nvcr.io/nvidia/pytorch:22.01-py3 as base
 #create a new new user
 RUN useradd -ms /bin/bash zengyu
 
-# #change to this user
+#change to this user
 # USER zengyu
 
 #set working directory
@@ -20,7 +20,7 @@ RUN conda install -y python=3.7
 RUN pip install rdkit
 RUN conda install -y -c conda-forge -c pytorch pytorch=1.9.1
 
-RUN conda install -y -c pyg -c conda-forge pyg
+RUN conda install -y -c pyg -c conda-forge pyg==2.0.3
 
 RUN pip install requests
 RUN pip install tqdm
@@ -34,7 +34,7 @@ RUN pip install boto3
 RUN pip install transformers
 
 # for MoleculeNet
-RUN pip install ogb
+RUN pip install ogb==1.2.0
 
 # install pysmilesutils
 RUN python -m pip install git+https://github.com/MolecularAI/pysmilesutils.git

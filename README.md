@@ -1,5 +1,10 @@
 # Mol-Align 
-1.molecule_edit_utils.py需要修改load_molecule_models与load_language_molecule_and_edit_models  
-2.modality_adapter_train.py需要修改get_molecule_repr_generation与save_model  
-3.molecule_edit.py需要同步更改argparse与load_language_molecule_and_edit_models  
-必要时可以直接注释掉暂时不用的部分  
+MoleculeSTM在文本处理部分的text为一个列表，其中每一个元素来源于某个database
+在encode text的过程中，MoleculeSTM输入了一个batch，每个元素为一个描述list
+在组织成为Dataset的过程中，List中的每一个元素都成为一个单独的样本，所以在MoleculeSTM中会存在多个相同CID的数据
+实际在模型中每一个text样本都是一段文本不变
+
+
+
+
+

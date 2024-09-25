@@ -21,7 +21,7 @@ from transformers import AutoModel, AutoTokenizer
 from .models import CLIP, tokenize
 from .datasets import DataHelper, MolGraphDataset
 
-from basic_utils import Logger
+from basic_utils import Logger, seed_all
 
 
 def cycle_index(num, shift):
@@ -92,23 +92,8 @@ def cl_loss(s_features, t_features, args):
     return CL_loss, CL_acc
 
 
-def setup_seed(seed):
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.backends.cudnn.deterministic = True
-
-
-def assure_dir(path):
-    dir = os.path.dirname(path)
-    if not os.path.exists(dir):
-        os.makedirs(dir)
-
-
 def main(args):
-    setup_seed(seed)
+    seed_all(seed)
     save_dir = "./res/{}/".format(args.data_name)
     logger = Logger(args, save_dir)
     model_save_name = f"{args.gnn_type}-{args.exp_time}-alignment.pkl"

@@ -1,4 +1,5 @@
 import os
+import os.path as osp
 import copy
 import torch
 import torch.nn as nn
@@ -108,12 +109,42 @@ Cysteine_SMILES = "NC(CS)C(=O)O"
 Glutathione_SMILES = "NC(CCC(=O)NC(CS)C(=O)NCC(=O)O)C(=O)O"
 
 
+def load_CLIP_graph_branch(args):
+    if args.molecule_type == "2DGraph" or args.molecule_type == "all":
+        print(f"Loading 2DGraph model from {args.graph_model_path}")
+        molecule_dim = args.gnn_emb_dim
+        molecule_node_model = GNN(
+            num_layer=args.num_layer, emb_dim=args.gnn_emb_dim,
+            JK=args.JK, drop_ratio=args.dropout_ratio,
+            gnn_type=args.gnn_type)
+        molecule_model = GNN_graphpred(
+            num_layer=args.num_layer,
+            emb_dim=args.gnn_emb_dim,
+            JK=args.JK,
+            graph_pooling=args.graph_pooling,
+            num_tasks=1,
+            molecule_node_model=molecule_node_model)
+        graph_state_dict = torch.load(args.graph_model_path, map_location='cpu')
+        molecule_model.load_state_dict(graph_state_dict)
+    if args.molecule_type == "3DGraph" or args.molecule_type == "all":
+        pass
+    if args.molecule_type == "SMILES" or args.molecule_type == "all":
+        pass
+    
+    print(f"Loading graph projector from {args.graph_projector_path}")
+    mol2latent = nn.Linear(molecule_dim, args.SSL_emb_dim)
+    projector_state_dict = torch.load(args.graph_projector_path, map_location='cpu')
+    mol2latent.load_state_dict(projector_state_dict)
+    
+    return molecule_model, mol2latent
+
+
 def load_molecule_models(args):
     """
     This function returns the two encoders, one for molecule generative model and one for CLIP.
     """
     if args.MoleculeSTM_molecule_type == "SMILES":
-        # This is loading from the pretarined_MegaMolBART
+        # This is loading from the pretrained_MegaMolBART
         MegaMolBART_wrapper = MegaMolBART(vocab_path=args.vocab_path, input_dir=args.MegaMolBART_generation_model_dir, output_dir=None)
         molecule_model_generation = copy.deepcopy(MegaMolBART_wrapper.model)
         print("Loading from pretrained MegaMolBART ({}).".format(args.MegaMolBART_generation_model_dir))
