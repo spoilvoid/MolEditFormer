@@ -11,14 +11,17 @@ import torch.nn as nn
 from torch import optim
 import torch.nn.functional as F
 from torch.utils.data import DataLoader as torch_DataLoader
-from torch_geometric.loader import DataLoader as pyg_DataLoader
+from torch.utils.tensorboard import SummaryWriter
 
-from basic_utils import get_mol_to_joint_latent, freeze_network
+from torch_geometric.data import Data
+from torch_geometric.loader import DataLoader as pyg_DataLoader
+from transformers import AutoModel, AutoTokenizer
+
 from models import MegaMolBART, MLP
-from molecule_edit_utils import load_CLIP_graph_branch
+from molecule_edit_utils import load_CLIP_molecule_branch
 from datasets import ZINC250K_Graph
 
-from basic_utils import Logger, seed_all
+from basic_utils import get_local_time, freeze_network, seed_all, Logger
 
 
 def cycle_index(num, shift):
@@ -83,7 +86,7 @@ def cl_loss(s_features, t_features, args):
         pred = logits.argmax(dim=1, keepdim=False)
         CL_acc = pred.eq(labels).sum().detach().cpu().item() * 1. / B
 
-    elif args.SSL_loss == 'RR':
+    elif args.SSL_loss == 'MESLoss':
         criterion = nn.MSELoss()
         CL_loss = criterion(X, Y)
         CL_acc = 0
@@ -102,16 +105,7 @@ def mean_pooling(token_embeddings, attention_mask):
     return sum_embeddings / sum_mask
 
 
-def get_molecule_repr_generation(molecule_data, molecule_model, molecule_type="MegaMolBART", MegaMolBART_wrapper=None):
-    if molecule_type == "MegaMolBART":
-        embedding, pad_mask = MegaMolBART_wrapper.smileslist2embedding_model_given(molecule_model, molecule_data)  # [pad, B, d], [pad, B]
-        molecule_repr = mean_pooling(embedding, pad_mask)
-    else:
-        molecule_repr, _ = molecule_model(molecule_data)
-    return molecule_repr
-
-
-def save_model(save_best, epoch=None):
+def save_model(save_best, args):
     if args.output_model_dir is not None:
         if save_best:
             global optimal_loss
@@ -132,112 +126,102 @@ def save_model(save_best, epoch=None):
     return
 
 
+def save_model(save_dir, prefix="", gen2joint_projector=None, joint2gen_projector=None):
+    if not osp.exists(save_dir):
+        os.makedirs(save_dir)
+    if gen2joint_projector is not None:
+        torch.save(gen2joint_projector.state_dict(), osp.join(save_dir, f"{prefix}_gen2joint_projector.pth"))
+    if joint2gen_projector is not None:
+        torch.save(joint2gen_projector.state_dict(), osp.join(save_dir, f"{prefix}_joint2gen_projector.pth"))
+
+
 def main(args):
     seed_all(args.seed)
     device = torch.device("cuda:{}".format(args.gpu) if torch.cuda.is_available() else "cpu")
     print("device:", device)
+    model_save_dir = osp.join(args.store_dir, f"mol_edit_1step{args.molecule_type}-{get_local_time()}")
+    logger = Logger(osp.join(model_save_dir, "log"), args.time_log)
+    writer = SummaryWriter(osp.join(model_save_dir, "tensorboard"))
 
     # load model
     if args.generation_model == "MegaMolBART":
-        MegaMolBART_wrapper = MegaMolBART(vocab_path=args.vocab_path, input_dir=args.MegaMolBART_generation_model_dir, output_dir=None)
+        gen_model_wrapper = MegaMolBART(vocab_path=args.vocab_path, input_dir=args.MegaMolBART_generation_model_dir, output_dir=None)
         print("Loading from pretrained MegaMolBART ({}).".format(args.MegaMolBART_generation_model_dir))
-        generation_model_dim = 256
+        gen_model_dim = args.gen_emb_dim
     else:
         raise NotImplementedError
     
-    graph_branch, graph_projector = load_CLIP_graph_branch(args)
-    graph_branch_dim = args.gnn_emb_dim
+    mol_branch, mol_projector = load_CLIP_molecule_branch(args)
+    mol_branch_dim = args.gnn_emb_dim
+    gen2joint_projector = MLP(gen_model_dim, [mol_branch_dim, mol_branch_dim]).to(device)
+    joint2gen_projector = MLP(mol_branch_dim, [gen_model_dim, gen_model_dim]).to(device)
 
-    MegaMolBART_wrapper = MegaMolBART_wrapper.to(device)
-    graph_branch = graph_branch.to(device)
-    graph_projector = graph_projector.to(device)
-    freeze_network(MegaMolBART_wrapper.model)
-    freeze_network(graph_branch)
-    freeze_network(graph_projector)
-    MegaMolBART_wrapper.model.eval()
-    graph_branch.eval()
-    graph_projector.eval()
+    gen_model_wrapper = gen_model_wrapper.model.to(device)
+    mol_branch = mol_branch.to(device)
+    mol_projector = mol_projector.to(device)
+    freeze_network(gen_model_wrapper.model)
+    freeze_network(mol_branch)
+    freeze_network(mol_projector)
+    gen_model_wrapper.model.eval()
+    mol_branch.eval()
+    mol_projector.eval()
+    gen2joint_projector.train()
+    joint2gen_projector.train()
 
     # load dataset
-    dataset = ZINC250K_Graph(args.data_dir)
-    dataloader = pyg_DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
-
-    graph_branch_dim = args.gnn_emb_dim
-    gen2joint_projector = MLP(generation_model_dim, [graph_branch_dim, graph_branch_dim]).to(device)
-    joint2gen_projector = MLP(graph_branch_dim, [generation_model_dim, generation_model_dim]).to(device)
+    if args.molecule_type not in ["2DGraph", "3DGraph", "SMILES", "all"]:
+        raise ValueError("Invalid molecule type")
+    trainset = ZINC250K_Graph(args.data_dir)
+    train_loader = pyg_DataLoader(trainset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
 
     model_param_group = [
         {"params": gen2joint_projector.parameters(), "lr": args.gen2joint_lr},
         {"params": joint2gen_projector.parameters(), "lr": args.joint2gen_lr},
     ]
     optimizer = optim.Adam(model_param_group, weight_decay=args.decay)
-    optimal_loss = 1e10
-    
-    for e in range(1, args.epochs+1):
-        print("Epoch {}".format(e))
-        train(e)
 
+    optimal_loss = sys.maxsize
+    for epoch_id in range(args.epoch_num):
+        epoch_loss = 0.0
+        for i_batch, sample_batched in tqdm(enumerate(train_loader), disable=False, total=len(train_loader)):
+            # forward the generation model to get the molecule representation in multi-modality model's joint space
+            SMILES_batched = sample_batched[0]
+            gen_model_embedding, gen_model_pad_mask = gen_model_wrapper.smileslist2embedding(SMILES_batched)
+            gen_repr = mean_pooling(gen_model_embedding, gen_model_pad_mask)
+            gen2joint_repr = gen2joint_projector(gen_repr)
+            # forward the molecule branch to get the molecule representation in multi-modality model's joint space
+            if args.molecule_type == "2DGraph" or args.molecule_type == "all":
+                graph_batched = sample_batched[1].to(device)
+                mol_branch_repr, mol_branch_pad_mask = mol_branch(graph_batched)
+            if args.molecule_type == "3DGraph" or args.molecule_type == "all":
+                pass
+            if args.molecule_type == "SMILES" or args.molecule_type == "all":
+                mol_branch_repr, mol_branch_pad_mask = mol_branch(SMILES_batched)
+            joint_repr = mol_projector(mol_branch_repr)
+            joint2gen_repr = joint2gen_projector(joint_repr)
 
-    if args.verbose:
-        L = tqdm(dataloader)
-    else:
-        L = dataloader
-    
-    start_time = time.time()
-    accum_loss, accum_acc = 0, 0
-    for batch in L:
-        if args.MoleculeSTM_molecule_type == "SMILES":
-            SMILES_list = batch
-        else:
-            SMILES_list, graph = batch
-            graph = graph.to(device)
+            loss_1, _ = cl_loss(joint_repr, gen2joint_repr, args)
+            loss_2, _ = cl_loss(gen_repr, joint2gen_repr, args)
 
-        if args.MoleculeSTM_molecule_type == "SMILES":
-            molecule_repr_MoleculeSTM = get_mol_to_joint_latent(
-                SMILES_list, molecule_model=molecule_model_MoleculeSTM, mol2latent=mol2latent_MoleculeSTM,
-                molecule_type=args.MoleculeSTM_molecule_type, MegaMolBART_wrapper=MegaMolBART_wrapper
-            )
-            molecule_repr_MoleculeSTM2generation = MoleculeSTM2generation(molecule_repr_MoleculeSTM)
+            loss = (loss_1 + loss_2) / 2
+            
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
 
-        else:
-            molecule_repr_MoleculeSTM = get_mol_to_joint_latent(
-                graph, molecule_model=molecule_model_MoleculeSTM, mol2latent=mol2latent_MoleculeSTM,
-                molecule_type=args.MoleculeSTM_molecule_type, MegaMolBART_wrapper=None
-            )
-            molecule_repr_MoleculeSTM2generation = MoleculeSTM2generation(molecule_repr_MoleculeSTM)
+            if (epoch_id * len(train_loader) + i_batch) % args.log_freq == 0:
+                logger.log("{} epoch {}th batch loss in :{}".format(epoch_id + 1, i_batch, loss / args.batch_size))
+                writer.add_scalar("Train_Loss/batch", loss / args.batch_size, epoch_id * len(train_loader) + i_batch)
+            if (epoch_id * len(train_loader) + i_batch) % args.save_freq == 0:
+                save_model(model_save_dir, f"epoch{epoch_id}_batch{i_batch}", gen2joint_projector, joint2gen_projector)
+            epoch_loss += loss / len(train_loader)
 
-        if args.generation_model == "MegaMolBART":
-            molecule_repr_generation = get_molecule_repr_generation(
-                SMILES_list, molecule_model=molecule_model_generation,
-                molecule_type="MegaMolBART", MegaMolBART_wrapper=MegaMolBART_wrapper
-            )
-        else:  # for HierVAE
-            hiervae_data_list = MolGraph.tensorize(SMILES_list, vocab, avocab)
-            molecule_repr_generation = molecule_model_generation.forward_MoleculeSTM(hiervae_data_list)
-        molecule_repr_generation2MoleculeSTM = generation2MoleculeSTM(molecule_repr_generation)
-
-        loss_01, acc_01 = do_CL(molecule_repr_generation, molecule_repr_MoleculeSTM2generation, args)
-        loss_02, acc_02 = do_CL(molecule_repr_MoleculeSTM, molecule_repr_generation2MoleculeSTM, args)
-        loss = (loss_01 + loss_02) / 2
-        acc = (acc_01 + acc_02) / 2
-        
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-
-        accum_loss += loss.item()
-        accum_acc += acc
-
-    accum_loss /= len(L)
-    accum_acc /= len(L)
-    
-    global optimal_loss
-    temp_loss = accum_loss
-    if temp_loss < optimal_loss:
-        optimal_loss = temp_loss
-        save_model(save_best=True, epoch=epoch)
-    print("SSL Loss: {:.5f}\tSSL Acc: {:.5f}\tTime: {:.5f}".format(accum_loss, accum_acc, time.time() - start_time))
-    return
+        logger.log("{}th epoch mean loss:{}".format(epoch_id + 1, epoch_loss))
+        writer.add_scalar("Train_Loss/epoch", epoch_loss, epoch_id + 1)
+        save_model(model_save_dir, f"epoch{epoch_id}", gen2joint_projector, joint2gen_projector)
+        if epoch_loss < optimal_loss:
+            optimal_loss = epoch_loss
+            save_model(model_save_dir, "best", gen2joint_projector, joint2gen_projector)
 
 
 if __name__ == "__main__":
@@ -265,6 +249,7 @@ if __name__ == "__main__":
     # fixed generation model config
     parser.add_argument('--generation_model', type=str, default="MegaMolBART", choices=["MegaMolBART"])
     parser.add_argument("--vocab_path", type=str, default="bart_vocab.txt")
+    parser.add_argument("--gen_emb_dim", type=int, default=256)
     # graph branch config
     parser.add_argument("--gnn_type", type=str, default="gin")
     parser.add_argument("--num_layer", type=int, default=5)
@@ -281,10 +266,9 @@ if __name__ == "__main__":
     parser.add_argument('--graph_projector_path', type=str, default='ckpt/GraphMVP')
     # save config
     parser.add_argument("--store_dir", type=str, default="ckpt/mol_align")
-    parser.add_argument("--loss_threshold", type=float, default=sys.maxsize)
     parser.add_argument("--save_freq", type=int, default=4000)
     # contrastive SSL config
-    parser.add_argument("--SSL_loss", type=str, default="EBM_NCE", choices=["EBM_NCE", "InfoNCE", "MSELoss"])
+    parser.add_argument("--SSL_loss", type=str, default="MSELoss", choices=["EBM_NCE", "InfoNCE", "MSELoss"])
     parser.add_argument("--CL_neg_samples", type=int, default=1)
     parser.add_argument("--T", type=float, default=0.1)
     parser.add_argument('--normalize', dest='normalize', action='store_true')

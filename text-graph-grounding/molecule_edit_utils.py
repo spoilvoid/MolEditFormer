@@ -109,7 +109,7 @@ Cysteine_SMILES = "NC(CS)C(=O)O"
 Glutathione_SMILES = "NC(CCC(=O)NC(CS)C(=O)NCC(=O)O)C(=O)O"
 
 
-def load_CLIP_graph_branch(args):
+def load_CLIP_molecule_branch(args):
     if args.molecule_type == "2DGraph" or args.molecule_type == "all":
         print(f"Loading 2DGraph model from {args.graph_model_path}")
         molecule_dim = args.gnn_emb_dim
@@ -124,14 +124,15 @@ def load_CLIP_graph_branch(args):
             graph_pooling=args.graph_pooling,
             num_tasks=1,
             molecule_node_model=molecule_node_model)
-        graph_state_dict = torch.load(args.graph_model_path, map_location='cpu')
-        molecule_model.load_state_dict(graph_state_dict)
+        
     if args.molecule_type == "3DGraph" or args.molecule_type == "all":
         pass
     if args.molecule_type == "SMILES" or args.molecule_type == "all":
         pass
-    
-    print(f"Loading graph projector from {args.graph_projector_path}")
+    molecule_state_dict = torch.load(args.graph_model_path, map_location='cpu')
+    molecule_model.load_state_dict(molecule_state_dict)
+
+    print(f"Loading molecule projector from {args.graph_projector_path}")
     mol2latent = nn.Linear(molecule_dim, args.SSL_emb_dim)
     projector_state_dict = torch.load(args.graph_projector_path, map_location='cpu')
     mol2latent.load_state_dict(projector_state_dict)

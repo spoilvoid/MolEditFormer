@@ -19,7 +19,6 @@ RUN conda install -y python=3.7
 
 RUN pip install rdkit
 RUN conda install -y -c conda-forge -c pytorch pytorch=1.9.1
-
 RUN conda install -y -c pyg -c conda-forge pyg==2.0.3
 
 RUN pip install requests

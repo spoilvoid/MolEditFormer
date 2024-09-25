@@ -155,9 +155,17 @@ def main(args):
         epoch_loss = 0.0
         for i_batch, sample_batched in tqdm(enumerate(train_loader), disable=False, total=len(train_loader)):
             # load data from dataloader
-            # SMILES_batched = sample_batched[0]
+            if args.molecule_type not in ["2DGraph", "3DGraph", "SMILES", "all"]:
+                raise ValueError("Invalid molecule type")
+            
+            if args.molecule_type == "2DGraph" or args.molecule_type == "all":
+                graph_batched = sample_batched[2].to(device)
+            if args.molecule_type == "3DGraph" or args.molecule_type == "all":
+                pass
+            if args.molecule_type == "SMILES" or args.molecule_type == "all":
+                SMILES_batched = sample_batched[0]
+
             description_batched = sample_batched[1]
-            graph_batched = sample_batched[2].to(device)
 
             # s_n, t_n = sample_batched["s_n"], sample_batched["t_n"]
             # s_n_arr = s_n.numpy()  # .reshape((1, -1))
@@ -200,8 +208,7 @@ def main(args):
         model.save_model(model_save_dir, f"epoch{epoch_id}", save_config)
         if epoch_loss < optimal_loss:
             optimal_loss = epoch_loss
-            if optimal_loss < args.loss_threshold:
-                model.save_model(model_save_dir, "best", save_config)
+            model.save_model(model_save_dir, "best", save_config)
 
 
 if __name__ == "__main__":
@@ -246,7 +253,6 @@ if __name__ == "__main__":
     parser.add_argument('--graph_pretrain_dir', type=str, default='ckpt/GraphMVP')
     # save config
     parser.add_argument("--store_dir", type=str, default="ckpt/mol_align")
-    parser.add_argument("--loss_threshold", type=float, default=sys.maxsize)
     parser.add_argument("--save_freq", type=int, default=4000)
     # contrastive SSL config
     parser.add_argument("--SSL_loss", type=str, default="EBM_NCE", choices=["EBM_NCE", "InfoNCE"])

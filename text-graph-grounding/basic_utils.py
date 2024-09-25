@@ -39,18 +39,6 @@ def prepare_text_tokens(device, description, tokenizer, max_seq_len):
     return tokens_ids, masks
 
 
-def get_mol_to_joint_latent(molecule_data, mol2latent=None, molecule_type="SMILES", MegaMolBART_wrapper=None, molecule_model=None):
-    if molecule_type == "SMILES":
-        embedding, pad_mask = MegaMolBART_wrapper.smileslist2embedding(molecule_data)  # [pad, B, d], [pad, B]
-        molecule_repr = embedding[0, :, :]  # [B, d]
-    else:
-        molecule_repr, _ = molecule_model(molecule_data)
-    
-    if mol2latent is not None:
-        molecule_repr = mol2latent(molecule_repr)
-    return molecule_repr
-
-
 def freeze_network(model):
     for param in model.parameters():
         param.requires_grad = False
