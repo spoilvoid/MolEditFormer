@@ -10,28 +10,14 @@ from rdkit import Chem, RDLogger
 from rdkit.Chem import AllChem, Descriptors
 from rdkit import DataStructs
 
-from .models import MegaMolBART, GNN, GNN_graphpred, MLP
+from models import MegaMolBART, GNN, GNN_graphpred, MLP
 
 
 lg = RDLogger.logger()
 lg.setLevel(RDLogger.CRITICAL)
 
 
-def get_SMILES_list(args):
-    if args.input_SMILES is not None:
-        SMILES_list = [args.input_SMILES]
-    else:
-        SMILES_list = []
-        f = open(args.input_SMILES_file, 'r')
-        lines = f.readlines()
-        for line in lines:
-            SMILES = line.strip()
-            if len(SMILES) > 0:
-                SMILES_list.append(SMILES)
-    return SMILES_list
-
-
-description_dict = {
+DESCRIPTION_DICT = {
     101: "This molecule is soluble in water.",
     102: "This molecule is insoluble in water.",
     103: "This molecule is like a drug.",
@@ -68,18 +54,6 @@ description_dict = {
 }
 
 
-def get_description_list(args):
-    if args.input_description is not None:
-        description_list = [args.input_description]
-    elif args.input_description_id is None:
-        raise ValueError
-    else:
-        print("Use {} descrition.".format(args.input_description_id))
-        description_list = [description_dict[args.input_description_id]]
-    print("description_list", description_list)
-    return description_list
-
-
 # https://pubchem.ncbi.nlm.nih.gov/compound/5904
 # Penicillin_SMILES = "CC1(C(N2C(S1)C(C2=O)NC(=O)CC3=CC=CC=C3)C(=O)O)C"
 Penicillin_SMILES = "CC1(C)SC2C(NC(=O)Cc3ccccc3)C(=O)N2C1C(=O)O"
@@ -109,151 +83,103 @@ Cysteine_SMILES = "NC(CS)C(=O)O"
 Glutathione_SMILES = "NC(CCC(=O)NC(CS)C(=O)NCC(=O)O)C(=O)O"
 
 
-def load_CLIP_molecule_branch(args):
-    if args.molecule_type == "2DGraph" or args.molecule_type == "all":
-        print(f"Loading 2DGraph model from {args.graph_model_path}")
-        molecule_dim = args.gnn_emb_dim
-        molecule_node_model = GNN(
-            num_layer=args.num_layer, emb_dim=args.gnn_emb_dim,
-            JK=args.JK, drop_ratio=args.dropout_ratio,
-            gnn_type=args.gnn_type)
-        molecule_model = GNN_graphpred(
-            num_layer=args.num_layer,
-            emb_dim=args.gnn_emb_dim,
-            JK=args.JK,
-            graph_pooling=args.graph_pooling,
-            num_tasks=1,
-            molecule_node_model=molecule_node_model)
-        
-    if args.molecule_type == "3DGraph" or args.molecule_type == "all":
-        pass
-    if args.molecule_type == "SMILES" or args.molecule_type == "all":
-        pass
-    molecule_state_dict = torch.load(args.graph_model_path, map_location='cpu')
-    molecule_model.load_state_dict(molecule_state_dict)
-
-    print(f"Loading molecule projector from {args.graph_projector_path}")
-    mol2latent = nn.Linear(molecule_dim, args.SSL_emb_dim)
-    projector_state_dict = torch.load(args.graph_projector_path, map_location='cpu')
-    mol2latent.load_state_dict(projector_state_dict)
-    
-    return molecule_model, mol2latent
-
-
-def load_molecule_models(args):
-    """
-    This function returns the two encoders, one for molecule generative model and one for CLIP.
-    """
-    if args.MoleculeSTM_molecule_type == "SMILES":
-        # This is loading from the pretrained_MegaMolBART
-        MegaMolBART_wrapper = MegaMolBART(vocab_path=args.vocab_path, input_dir=args.MegaMolBART_generation_model_dir, output_dir=None)
-        molecule_model_generation = copy.deepcopy(MegaMolBART_wrapper.model)
-        print("Loading from pretrained MegaMolBART ({}).".format(args.MegaMolBART_generation_model_dir))
-        molecule_dim_generation = 256
-        
-        input_model_path = os.path.join(args.MoleculeSTM_model_dir, "molecule_model.pth")
-        molecule_model_MoleculeSTM = MegaMolBART_wrapper.model
-        state_dict = torch.load(input_model_path, map_location='cpu')
-        print("Loading from {}...".format(input_model_path))
-        molecule_model_MoleculeSTM.load_state_dict(state_dict)
-        molecule_dim_MoleculeSTM = args.SSL_emb_dim
-        
-        mol2latent_MoleculeSTM = nn.Linear(256, molecule_dim_MoleculeSTM)
-        input_model_path = os.path.join(args.MoleculeSTM_model_dir, "mol2latent_model.pth")
-        print("Loading from {}...".format(input_model_path))
-        state_dict = torch.load(input_model_path, map_location='cpu')
-        mol2latent_MoleculeSTM.load_state_dict(state_dict)
-
+def get_edit_SMILES_list(args):
+    SMILES_list = []
+    if args.test:
+        if args.input_SMILES is not None:
+            SMILES_list.append(args.input_SMILES)
     else:
-        # This is loading from the pretarined_MegaMolBART
-        MegaMolBART_wrapper = MegaMolBART(vocab_path=args.vocab_path, input_dir=args.MegaMolBART_generation_model_dir, output_dir=None)
-        molecule_model_generation = copy.deepcopy(MegaMolBART_wrapper.model)
-        print("Loading from pretrained MegaMolBART ({}).".format(args.MegaMolBART_generation_model_dir))
-        molecule_dim_generation = 256
+        f = open(args.input_SMILES_file, 'r')
+        lines = f.readlines()
+        for line in lines:
+            SMILES = line.strip()
+            if len(SMILES) > 0:
+                SMILES_list.append(SMILES)
+    return SMILES_list
 
-        # This is loading GNN from the pretrained_GNN
-        molecule_node_model = GNN(num_layer=args.num_layer, emb_dim=args.gnn_emb_dim, JK=args.JK, drop_ratio=args.dropout_ratio, gnn_type=args.gnn_type)
-        molecule_model_MoleculeSTM = GNN_graphpred(num_layer=args.num_layer, emb_dim=args.gnn_emb_dim, JK=args.JK, graph_pooling=args.graph_pooling, num_tasks=1, molecule_node_model=molecule_node_model) 
-        print("Start from pretrained model (MoleculeSTM) in {}.".format(args.MoleculeSTM_model_dir))
-        input_model_path = os.path.join(args.MoleculeSTM_model_dir, "molecule_model.pth")
-        state_dict = torch.load(input_model_path, map_location='cpu')
-        molecule_model_MoleculeSTM.load_state_dict(state_dict)
-        molecule_dim_MoleculeSTM = args.SSL_emb_dim
+
+def get_edit_prompt_list(args):
+    description_list = []
+    if args.test:
+        if args.input_description is not None:
+            description_list.append(args.input_description)
+    else:
+        if args.input_description_id not in DESCRIPTION_DICT.keys():
+            raise ValueError
+        else:
+            print("Use {} descrition.".format(args.input_description_id))
+            description_list.append(DESCRIPTION_DICT[args.input_description_id])
+    return description_list
+
+
+# def load_CLIP_molecule_branch(args):
+#     if args.molecule_type == "2DGraph" or args.molecule_type == "all":
+#         print(f"Loading 2DGraph model from {args.graph_model_path}")
+#         molecule_dim = args.gnn_emb_dim
+#         molecule_node_model = GNN(
+#             num_layer=args.num_layer, emb_dim=args.gnn_emb_dim,
+#             JK=args.JK, drop_ratio=args.dropout_ratio,
+#             gnn_type=args.gnn_type)
+#         molecule_model = GNN_graphpred(
+#             num_layer=args.num_layer,
+#             emb_dim=args.gnn_emb_dim,
+#             JK=args.JK,
+#             graph_pooling=args.graph_pooling,
+#             num_tasks=1,
+#             molecule_node_model=molecule_node_model)
         
-        mol2latent_MoleculeSTM = nn.Linear(300, molecule_dim_MoleculeSTM)
-        input_model_path = os.path.join(args.MoleculeSTM_model_dir, "mol2latent_model.pth")
-        print("Loading from {}...".format(input_model_path))
-        state_dict = torch.load(input_model_path, map_location='cpu')
-        mol2latent_MoleculeSTM.load_state_dict(state_dict)
+#     if args.molecule_type == "3DGraph" or args.molecule_type == "all":
+#         pass
+#     if args.molecule_type == "SMILES" or args.molecule_type == "all":
+#         pass
+#     state_dict = torch.load(args.mol_model_path, map_location='cpu')
+#     molecule_model.load_state_dict(state_dict)
 
-    return MegaMolBART_wrapper, molecule_model_generation, molecule_dim_generation, \
-        molecule_model_MoleculeSTM, mol2latent_MoleculeSTM, molecule_dim_MoleculeSTM
-
-
-def load_language_molecule_and_edit_models(args):
-    pretrained_SciBERT_folder = os.path.join(args.dataspace_path, 'pretrained_SciBERT')
-    text_tokenizer = AutoTokenizer.from_pretrained('allenai/scibert_scivocab_uncased', cache_dir=pretrained_SciBERT_folder)
-    text_model = AutoModel.from_pretrained('allenai/scibert_scivocab_uncased', cache_dir=pretrained_SciBERT_folder)
-    text_dim = 768
-
-    input_model_path = os.path.join(args.MoleculeSTM_model_dir, "text_model.pth")
-    print("Loading from {}...".format(input_model_path))
-    state_dict = torch.load(input_model_path, map_location='cpu')
-    text_model.load_state_dict(state_dict)
-
-    """
-    input_model_path = os.path.join(args.MoleculeSTM_model_dir, "molecule_model.pth")
-    print("Loading from {}...".format(input_model_path))
-    MegaMolBART_wrapper = MegaMolBART(input_dir=None, output_dir=None)
-    molecule_model = MegaMolBART_wrapper.model
-    state_dict = torch.load(input_model_path, map_location='cpu')
-    molecule_model.load_state_dict(state_dict)
-    """
-    # This is loading from the pretarined_MegaMolBART
-    MegaMolBART_wrapper = MegaMolBART(vocab_path=args.vocab_path, input_dir=args.MegaMolBART_generation_model_dir, output_dir=None)
-    molecule_model = MegaMolBART_wrapper.model
-    print("Loading from pretrained MegaMolBART ({}).".format(args.MegaMolBART_generation_model_dir))
-    molecule_dim_generation = 256
-    if args.MoleculeSTM_molecule_type == "SMILES":  # For MegaMolBART
-        molecule_dim_MoleculeSTM = 256
-    else:  # For GIN
-        molecule_dim_MoleculeSTM = 300
-
-    text2latent = nn.Linear(text_dim, args.SSL_emb_dim)
-    input_model_path = os.path.join(args.MoleculeSTM_model_dir, "text2latent_model.pth")
-    print("Loading from {}...".format(input_model_path))
-    state_dict = torch.load(input_model_path, map_location='cpu')
-    text2latent.load_state_dict(state_dict)
+#     print(f"Loading molecule projector from {args.mol_projector_path}")
+#     mol2latent = nn.Linear(molecule_dim, args.SSL_emb_dim)
+#     state_dict = torch.load(args.mol_projector_path, map_location='cpu')
+#     mol2latent.load_state_dict(state_dict)
     
-    mol2latent = nn.Linear(molecule_dim_MoleculeSTM, args.SSL_emb_dim)
-    input_model_path = os.path.join(args.MoleculeSTM_model_dir, "mol2latent_model.pth")
-    print("Loading from {}...".format(input_model_path))
-    state_dict = torch.load(input_model_path, map_location='cpu')
-    mol2latent.load_state_dict(state_dict)
-
-    # generation2MoleculeSTM = nn.Linear(molecule_dim_generation, args.SSL_emb_dim)
-    generation2MoleculeSTM = MLP(molecule_dim_generation, [args.SSL_emb_dim, args.SSL_emb_dim])
-    input_model_path = os.path.join(args.language_edit_model_dir, "generation2foundation_model.pth")
-    print("Loading from {}...".format(input_model_path))
-    state_dict = torch.load(input_model_path, map_location='cpu')
-    generation2MoleculeSTM.load_state_dict(state_dict)
-
-    # MoleculeSTM2generation = nn.Linear(args.SSL_emb_dim, molecule_dim_generation)
-    MoleculeSTM2generation = MLP(args.SSL_emb_dim, [molecule_dim_generation, molecule_dim_generation])
-    input_model_path = os.path.join(args.language_edit_model_dir, "foundation2generation_model.pth")
-    print("Loading from {}...".format(input_model_path))
-    state_dict = torch.load(input_model_path, map_location='cpu')
-    MoleculeSTM2generation.load_state_dict(state_dict)
-
-    return text_model, text_tokenizer, text_dim, molecule_model, MegaMolBART_wrapper, molecule_dim_generation, text2latent, mol2latent, generation2MoleculeSTM, MoleculeSTM2generation
+#     return molecule_model, mol2latent
 
 
-def clip_loss_for_edit(molecule_repr, text_repr):
-    molecule_repr = F.normalize(molecule_repr, dim=-1)
-    text_repr = F.normalize(text_repr, dim=-1)
+# def load_CLIP_text_branch(args):
+#     text_dim = args.text_emb_dim
+#     text_tokenizer = AutoTokenizer.from_pretrained(args.text_pretrain_dir)
+#     text_model = AutoModel.from_pretrained(args.text_pretrain_dir)
 
-    similarity = -torch.mm(molecule_repr, text_repr.transpose(0, 1))[0]
-    return similarity
+#     print(f"Loading text model from {args.text_model_path}")
+#     state_dict = torch.load(args.text_model_path, map_location='cpu')
+#     text_model.load_state_dict(state_dict)
+
+#     print(f"Loading text projector from {args.text_projector_path}")
+#     text2latent = nn.Linear(text_dim, args.SSL_emb_dim)
+#     state_dict = torch.load(args.text_projector_path, map_location='cpu')
+#     text2latent.load_state_dict(state_dict)
+    
+#     return (text_model, text_tokenizer), text2latent
+
+
+def load_space_projector(args):
+    gen2joint_projector = MLP(args.gen_emb_dim, [args.SSL_emb_dim, args.SSL_emb_dim])
+    joint2gen_projector = MLP(args.SSL_emb_dim, [args.gen_emb_dim, args.gen_emb_dim])
+
+    if args.resume:
+        if osp.exists(args.gen2joint_projector_path):
+            print(f"Loading gen2joint_space_projector from {args.gen2joint_projector_path}")
+            state_dict = torch.load(args.gen2joint_projector_path, map_location='cpu')
+            gen2joint_projector.load_state_dict(state_dict)
+        else:
+            print(f"{args.gen2joint_projector_path} does not exist, random initialization.")
+            
+        if osp.exists(args.joint2gen_projector_path):
+            print(f"Loading joint2gen_space_projector from {args.joint2gen_projector_path}")
+            state_dict = torch.load(args.joint2gen_projector_path, map_location='cpu')
+            joint2gen_projector.load_state_dict(state_dict)
+        else:
+            print(f"{args.joint2gen_projector_path} does not exist, random initialization.")
+    
+    return gen2joint_projector, joint2gen_projector
 
 
 def get_molecule_similarity(mol_a, mol_b):

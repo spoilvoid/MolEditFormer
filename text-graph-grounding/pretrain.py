@@ -1,12 +1,8 @@
 import os
 import os.path as osp
 import sys
-import random
-from random import sample
-import math
 import time
 import argparse
-import json
 import numpy as np
 from tqdm import tqdm
 from sklearn import preprocessing
@@ -111,7 +107,6 @@ def main(args):
         os.makedirs(model_save_dir)
     logger = Logger(osp.join(model_save_dir, "log"), args.time_log)
     writer = SummaryWriter(osp.join(model_save_dir, "tensorboard"))
-    
 
     model = CLIP(args).to(device)
     model.train()
@@ -235,6 +230,12 @@ if __name__ == "__main__":
     parser.add_argument("--repr_frozen", dest='repr_frozen', action='store_true')
     parser.add_argument('--no_repr_frozen', dest='repr_frozen', action='store_false')
     parser.set_defaults(repr_frozen=False)
+    parser.add_argument("--mol_branch", dest='mol_branch', action='store_true')
+    parser.add_argument('--no_mol_branch', dest='mol_branch', action='store_false')
+    parser.set_defaults(mol_branch=True)
+    parser.add_argument("--text_branch", dest='text_branch', action='store_true')
+    parser.add_argument('--no_text_branch', dest='text_branch', action='store_false')
+    parser.set_defaults(text_branch=True)
     # text branch config
     parser.add_argument("--text_emb_dim", type=int, default=768)
     parser.add_argument("--max_seq_len", type=int, default=512)
@@ -250,7 +251,14 @@ if __name__ == "__main__":
     parser.add_argument("--SSL_emb_dim", type=int, default=256)
     # load config
     parser.add_argument('--text_pretrain_dir', type=str, default='ckpt/SciBERT')
-    parser.add_argument('--graph_pretrain_dir', type=str, default='ckpt/GraphMVP')
+    parser.add_argument('--mol_pretrain_dir', type=str, default='ckpt/GraphMVP')
+    parser.add_argument('--resume', action='store_true')
+    parser.add_argument('--no_resume', dest='resume', action='store_false')
+    parser.set_defaults(resume=False)
+    parser.add_argument('--text_model_path', type=str, default='ckpt/mol_align/text_model.pth')
+    parser.add_argument('--text_projector_path', type=str, default='ckpt/mol_align/text_projector.pth')
+    parser.add_argument('--mol_model_path', type=str, default='ckpt/mol_align/mol_model.pth')
+    parser.add_argument('--mol_projector_path', type=str, default='ckpt/mol_align/mol_projector.pth')
     # save config
     parser.add_argument("--store_dir", type=str, default="ckpt/mol_align")
     parser.add_argument("--save_freq", type=int, default=4000)

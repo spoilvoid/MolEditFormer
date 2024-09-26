@@ -88,46 +88,63 @@ class CLIP(nn.Module):
         super().__init__()
 
         # self.context_length = args.context_length
-        # self.args = args
+        self.args = args
         # self.edge_coef = args.edge_coef
         # self.text_pretrain_folder = args.text_pretrain_folder
 
-        # load molecule branch
-        if args.molecule_type not in ["2DGraph", "3DGraph", "SMILES", "all"]:
-            raise ValueError("Invalid molecule type")
+        if not (args.mol_branch and args.text_branch):
+            raise ValueError("At least one of the branches should be enabled")
         
-        if args.molecule_type == "2DGraph" or args.molecule_type == "all":
-            self.molecule_dim = args.gnn_emb_dim
-
-            self.molecule_node_model = GNN(
-                num_layer=args.num_layer, emb_dim=args.gnn_emb_dim,
-                JK=args.JK, drop_ratio=args.dropout_ratio,
-                gnn_type=args.gnn_type)
-            self.molecule_model = GNN_graphpred(
-                num_layer=args.num_layer,
-                emb_dim=args.gnn_emb_dim,
-                JK=args.JK,
-                graph_pooling=args.graph_pooling,
-                num_tasks=1,
-                molecule_node_model=self.molecule_node_model)
+        # load molecule branch
+        if args.mol_branch:
+            if args.molecule_type not in ["2DGraph", "3DGraph", "SMILES", "all"]:
+                raise ValueError("Invalid molecule type")
             
-            pretrained_graph_path = osp.join(args.graph_pretrain_dir, args.pretrain_gnn_mode, "model.pth")
-            self.molecule_model.from_pretrained(pretrained_graph_path)
+            if args.molecule_type == "2DGraph" or args.molecule_type == "all":
+                self.molecule_dim = args.gnn_emb_dim
 
-        if args.molecule_type == "3DGraph" or args.molecule_type == "all":
-            pass
-        if args.molecule_type == "SMILES" or args.molecule_type == "all":
-            pass
+                self.molecule_node_model = GNN(
+                    num_layer=args.num_layer, emb_dim=args.gnn_emb_dim,
+                    JK=args.JK, drop_ratio=args.dropout_ratio,
+                    gnn_type=args.gnn_type)
+                self.molecule_model = GNN_graphpred(
+                    num_layer=args.num_layer,
+                    emb_dim=args.gnn_emb_dim,
+                    JK=args.JK,
+                    graph_pooling=args.graph_pooling,
+                    num_tasks=1,
+                    molecule_node_model=self.molecule_node_model)
+            if args.molecule_type == "3DGraph" or args.molecule_type == "all":
+                pass
+            if args.molecule_type == "SMILES" or args.molecule_type == "all":
+                pass
+            # load molecule projector
+            self.mol2latent = nn.Linear(self.molecule_dim, args.SSL_emb_dim)
+            # load molecule branch weight
+            if args.resume:
+                state_dict = torch.load(args.mol_model_path, map_location='cpu')
+                self.molecule_model.load_state_dict(state_dict)
+                state_dict = torch.load(args.mol_projector_path, map_location='cpu')
+                self.mol2latent.load_state_dict(state_dict)
+            else:
+                pretrained_graph_path = osp.join(args.mol_pretrain_dir, args.pretrain_gnn_mode, "model.pth")
+                self.molecule_model.from_pretrained(pretrained_graph_path)
 
         # load text branch
-        self.max_seq_len = args.max_seq_len
-        self.text_dim = args.text_emb_dim
-        self.text_tokenizer = AutoTokenizer.from_pretrained(args.text_pretrain_dir)
-        self.text_model = AutoModel.from_pretrained(args.text_pretrain_dir)
-        
-        # load projector
-        self.text2latent = nn.Linear(self.text_dim, args.SSL_emb_dim)
-        self.mol2latent = nn.Linear(self.molecule_dim, args.SSL_emb_dim)
+        if args.text_branch:
+            self.max_seq_len = args.max_seq_len
+            self.text_dim = args.text_emb_dim
+            self.text_tokenizer = AutoTokenizer.from_pretrained(args.text_pretrain_dir)
+            self.text_model = AutoModel.from_pretrained(args.text_pretrain_dir)
+            # load text projector
+            self.text2latent = nn.Linear(self.text_dim, args.SSL_emb_dim)
+            # load text branch weight
+            if args.resume:
+                state_dict = torch.load(args.text_model_path, map_location='cpu')
+                self.text_model.load_state_dict(state_dict)
+                state_dict = torch.load(args.text_projector_path, map_location='cpu')
+                self.text2latent.load_state_dict(state_dict)
+
         
         # self.transformer = Transformer(
         #     width=args.transformer_width,
@@ -197,6 +214,8 @@ class CLIP(nn.Module):
         return tokens_ids, masks
 
     def encode_graph(self, molecule_data):
+        if not self.args.mol_branch:
+            raise ValueError("molecule branch should be enabled")
         molecule_repr, _ = self.molecule_model(molecule_data)
         molecule_repr = self.mol2latent(molecule_repr)
         # embs = self.gnn(g)
@@ -224,11 +243,13 @@ class CLIP(nn.Module):
     #     x = x @ self.text_projection
     #     return x
 
-    def encode_text_from_pretrain_model(self, text, text_tokenizer, device):
+    def encode_text_from_pretrain_model(self, text, device):
+        if not self.args.text_branch:
+            raise ValueError("text branch should be enabled")
         description_tokens_ids, description_masks = self.prepare_text_tokens(
             device,
             description=text,
-            tokenizer=text_tokenizer,
+            tokenizer=self.text_tokenizer,
             max_seq_len=self.max_seq_len
         )
         description_output = self.text_model(input_ids=description_tokens_ids, attention_mask=description_masks)
@@ -237,9 +258,16 @@ class CLIP(nn.Module):
         return description_repr
 
     def forward(self, molecule_data, text, device):  # g, s_n, t_n, s_n_text, t_n_text
+        if not (self.args.mol_branch and self.args.text_branch):
+            raise ValueError("text branch and molecule branch should both be enabled")
+        elif self.args.mol_branch and not self.args.text_branch:
+            raise ValueError("text branch should be enabled")
+        elif not self.args.mol_branch and self.args.text_branch:
+            raise ValueError("molecule branch should be enabled")
+        
         s_image_features = self.encode_graph(molecule_data)
 
-        text_features = self.encode_text_from_pretrain_model(text, self.text_tokenizer, device)
+        text_features = self.encode_text_from_pretrain_model(text, device)
 
         # t_text_features = self.encode_text(t_n_text)
         # t_text_features = text_features.reshape(s_image_features.shape[0], self.args.neigh_num, self.args.gnn_output)

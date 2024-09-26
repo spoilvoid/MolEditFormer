@@ -5,6 +5,7 @@ from torch.nn import functional as F
 
 
 class MLP(nn.Module):
+    
     def __init__(self, input_dim, hidden_dims, batch_norm=False, activation="relu", dropout=0):
         super(MLP, self).__init__()
 
@@ -32,6 +33,9 @@ class MLP(nn.Module):
             self.batch_norms = None
 
     def forward(self, input):
+    # n - 1 (input -> nn.Linear -> nn.BatchNorm1d -> nn.ReLU -> nn.Dropout -> nn.add)
+    # 1 (input -> nn.Linear)
+    # output_dim[-1]: hidden_dims[-1]
         layer_input = input
 
         for i, layer in enumerate(self.layers):

@@ -1,7 +1,8 @@
-import argparse
+
 import os
 import os.path as osp
 import sys
+import argparse
 import numpy as np
 from tqdm import tqdm
 import time
@@ -17,8 +18,8 @@ from torch_geometric.data import Data
 from torch_geometric.loader import DataLoader as pyg_DataLoader
 from transformers import AutoModel, AutoTokenizer
 
-from models import MegaMolBART, MLP
-from molecule_edit_utils import load_CLIP_molecule_branch
+from models import CLIP, MegaMolBART, MLP
+from molecule_edit_utils import load_space_projector
 from datasets import ZINC250K_Graph
 
 from basic_utils import get_local_time, freeze_network, seed_all, Logger
@@ -105,27 +106,6 @@ def mean_pooling(token_embeddings, attention_mask):
     return sum_embeddings / sum_mask
 
 
-def save_model(save_best, args):
-    if args.output_model_dir is not None:
-        if save_best:
-            global optimal_loss
-            print("save model with loss: {:.5f}".format(optimal_loss))
-            model_file = "model.pth"
-
-        elif epoch is None:
-            model_file = "model_final.pth"
-
-        else:
-            model_file = "model_{}.pth".format(epoch)
-
-        saved_file_path = os.path.join(args.output_model_dir, "generation2MoleculeSTM_{}".format(model_file))
-        torch.save(generation2MoleculeSTM.state_dict(), saved_file_path)
-        
-        saved_file_path = os.path.join(args.output_model_dir, "MoleculeSTM2generation_{}".format(model_file))
-        torch.save(MoleculeSTM2generation.state_dict(), saved_file_path)
-    return
-
-
 def save_model(save_dir, prefix="", gen2joint_projector=None, joint2gen_projector=None):
     if not osp.exists(save_dir):
         os.makedirs(save_dir)
@@ -144,27 +124,22 @@ def main(args):
     writer = SummaryWriter(osp.join(model_save_dir, "tensorboard"))
 
     # load model
-    if args.generation_model == "MegaMolBART":
-        gen_model_wrapper = MegaMolBART(vocab_path=args.vocab_path, input_dir=args.MegaMolBART_generation_model_dir, output_dir=None)
-        print("Loading from pretrained MegaMolBART ({}).".format(args.MegaMolBART_generation_model_dir))
-        gen_model_dim = args.gen_emb_dim
+    if args.gen_model == "MegaMolBART":
+        gen_model_wrapper = MegaMolBART(vocab_path=args.vocab_path, input_dir=args.gen_model_dir, output_dir=None)
+        print(f"Loading pretrained MegaMolBART from {args.gen_model_dir}.")
     else:
         raise NotImplementedError
-    
-    mol_branch, mol_projector = load_CLIP_molecule_branch(args)
-    mol_branch_dim = args.gnn_emb_dim
-    gen2joint_projector = MLP(gen_model_dim, [mol_branch_dim, mol_branch_dim]).to(device)
-    joint2gen_projector = MLP(mol_branch_dim, [gen_model_dim, gen_model_dim]).to(device)
+    mol_branch_model = CLIP(args)
+    gen2joint_projector, joint2gen_projector= load_space_projector(args)
 
-    gen_model_wrapper = gen_model_wrapper.model.to(device)
-    mol_branch = mol_branch.to(device)
-    mol_projector = mol_projector.to(device)
+    gen_model_wrapper.model = gen_model_wrapper.model.to(device)
+    mol_branch_model = mol_branch_model.to(device)
+    gen2joint_projector = gen2joint_projector.to(device)
+    joint2gen_projector = joint2gen_projector.to(device)
     freeze_network(gen_model_wrapper.model)
-    freeze_network(mol_branch)
-    freeze_network(mol_projector)
+    freeze_network(mol_branch_model)
     gen_model_wrapper.model.eval()
-    mol_branch.eval()
-    mol_projector.eval()
+    mol_branch_model.eval()
     gen2joint_projector.train()
     joint2gen_projector.train()
 
@@ -192,12 +167,11 @@ def main(args):
             # forward the molecule branch to get the molecule representation in multi-modality model's joint space
             if args.molecule_type == "2DGraph" or args.molecule_type == "all":
                 graph_batched = sample_batched[1].to(device)
-                mol_branch_repr, mol_branch_pad_mask = mol_branch(graph_batched)
+                joint_repr = mol_branch_model.encode_graph(graph_batched)
             if args.molecule_type == "3DGraph" or args.molecule_type == "all":
                 pass
             if args.molecule_type == "SMILES" or args.molecule_type == "all":
-                mol_branch_repr, mol_branch_pad_mask = mol_branch(SMILES_batched)
-            joint_repr = mol_projector(mol_branch_repr)
+                joint_repr = mol_branch_model.encode_graph(SMILES_batched)
             joint2gen_repr = joint2gen_projector(joint_repr)
 
             loss_1, _ = cl_loss(joint_repr, gen2joint_repr, args)
@@ -246,8 +220,14 @@ if __name__ == "__main__":
     parser.add_argument("--repr_frozen", dest='repr_frozen', action='store_true')
     parser.add_argument('--no_repr_frozen', dest='repr_frozen', action='store_false')
     parser.set_defaults(repr_frozen=False)
+    parser.add_argument("--mol_branch", dest='mol_branch', action='store_true')
+    parser.add_argument('--no_mol_branch', dest='mol_branch', action='store_false')
+    parser.set_defaults(mol_branch=True)
+    parser.add_argument("--text_branch", dest='text_branch', action='store_true')
+    parser.add_argument('--no_text_branch', dest='text_branch', action='store_false')
+    parser.set_defaults(text_branch=False)
     # fixed generation model config
-    parser.add_argument('--generation_model', type=str, default="MegaMolBART", choices=["MegaMolBART"])
+    parser.add_argument('--gen_model', type=str, default="MegaMolBART", choices=["MegaMolBART"])
     parser.add_argument("--vocab_path", type=str, default="bart_vocab.txt")
     parser.add_argument("--gen_emb_dim", type=int, default=256)
     # graph branch config
@@ -261,9 +241,15 @@ if __name__ == "__main__":
     # projector config
     parser.add_argument("--SSL_emb_dim", type=int, default=256)
     # load config
-    parser.add_argument("--generation_model_dir", type=str, default="ckpt/MegaMolBART/checkpoints")
-    parser.add_argument('--graph_model_path', type=str, default='ckpt/GraphMVP')
-    parser.add_argument('--graph_projector_path', type=str, default='ckpt/GraphMVP')
+    parser.add_argument("--gen_model_dir", type=str, default="ckpt/MegaMolBART/checkpoints")
+    parser.add_argument("--resume", dest='resume', action='store_true')
+    parser.add_argument('--no_resume', dest='resume', action='store_false')
+    parser.set_defaults(resume=True)
+    parser.add_argument('--mol_pretrain_dir', type=str, default='ckpt/GraphMVP')
+    parser.add_argument('--mol_model_path', type=str, default='ckpt/mol_align/mol_model.pth')
+    parser.add_argument('--mol_projector_path', type=str, default='ckpt/mol_align/mol_projector.pth')
+    parser.add_argument('--gen2joint_projector_path', type=str, default='ckpt/mol_align/gen2joint_projector.pth')
+    parser.add_argument('--joint2gen_projector_path', type=str, default='ckpt/mol_align/joint2gen_projector.pth')
     # save config
     parser.add_argument("--store_dir", type=str, default="ckpt/mol_align")
     parser.add_argument("--save_freq", type=int, default=4000)
@@ -276,7 +262,6 @@ if __name__ == "__main__":
     parser.set_defaults(normalize=True)
 
     args = parser.parse_args()
-    print(args)
 
     start = time.perf_counter()
     main(args)
