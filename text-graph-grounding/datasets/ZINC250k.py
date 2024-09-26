@@ -23,7 +23,7 @@ class ZINC250K_Graph(InMemoryDataset):
         df = pd.read_csv(self.raw_SMILES_filepath)
         self.SMILES_list = df['smiles'].tolist()
         
-        super(ZINC250K_Dataset_Graph, self).__init__(root, transform, pre_transform, pre_filter)
+        super(ZINC250K_Graph, self).__init__(root, transform, pre_transform, pre_filter)
 
         self.graphs, self.slices = torch.load(self.processed_paths[0])
 

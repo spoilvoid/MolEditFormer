@@ -192,10 +192,10 @@ def main(args):
             # information record and save model
             loss = round((all_loss.detach().clone()).cpu().item(), 4)
             if (epoch_id * len(train_loader) + i_batch) % args.log_freq == 0:
-                logger.log("{} epoch {}th batch loss in :{}".format(epoch_id + 1, i_batch, loss / args.batch_size))
-                writer.add_scalar("Train_Loss/batch", loss / args.batch_size, epoch_id * len(train_loader) + i_batch)
-            if (epoch_id * len(train_loader) + i_batch) % args.save_freq == 0:
-                model.save_model(model_save_dir, f"epoch{epoch_id}_batch{i_batch}", save_config)
+                logger.log("{} epoch {}th batch loss in :{}".format(epoch_id + 1, i_batch, loss))
+                writer.add_scalar("Train_Loss/batch", loss, epoch_id * len(train_loader) + i_batch)
+            # if (epoch_id * len(train_loader) + i_batch) % args.save_freq == 0:
+            #     model.save_model(model_save_dir, f"epoch{epoch_id}_batch{i_batch}", save_config)
             epoch_loss += loss / len(train_loader)
 
         logger.log("{}th epoch mean loss:{}".format(epoch_id + 1, epoch_loss))
@@ -219,9 +219,9 @@ if __name__ == "__main__":
     # train config
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--gpu", type=int, default=1)
-    parser.add_argument("--epoch_num", type=int, default=100, help="epoch number")
-    parser.add_argument("--text_lr", type=float, default=2e-5)
-    parser.add_argument("--graph_lr", type=float, default=2e-5)
+    parser.add_argument("--epoch_num", type=int, default=32, help="epoch number")
+    parser.add_argument("--text_lr", type=float, default=1e-4)
+    parser.add_argument("--graph_lr", type=float, default=1e-5)
     parser.add_argument("--text_lr_scale", type=float, default=1)
     parser.add_argument("--graph_lr_scale", type=float, default=1)
     parser.add_argument("--weight_decay", type=float, default=0)
@@ -260,7 +260,7 @@ if __name__ == "__main__":
     parser.add_argument('--mol_model_path', type=str, default='ckpt/mol_align/mol_model.pth')
     parser.add_argument('--mol_projector_path', type=str, default='ckpt/mol_align/mol_projector.pth')
     # save config
-    parser.add_argument("--store_dir", type=str, default="ckpt/mol_align")
+    parser.add_argument("--store_dir", type=str, default="ckpt/MolAlign/pretrain")
     parser.add_argument("--save_freq", type=int, default=4000)
     # contrastive SSL config
     parser.add_argument("--SSL_loss", type=str, default="EBM_NCE", choices=["EBM_NCE", "InfoNCE"])

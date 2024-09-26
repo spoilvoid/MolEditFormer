@@ -92,7 +92,7 @@ class CLIP(nn.Module):
         # self.edge_coef = args.edge_coef
         # self.text_pretrain_folder = args.text_pretrain_folder
 
-        if not (args.mol_branch and args.text_branch):
+        if not args.mol_branch and not args.text_branch:
             raise ValueError("At least one of the branches should be enabled")
         
         # load molecule branch

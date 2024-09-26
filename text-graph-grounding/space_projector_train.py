@@ -212,14 +212,11 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--gpu", type=int, default=1)
     parser.add_argument("--epoch_num", type=int, default=100, help="epoch number")
-    parser.add_argument("--gen2joint_lr", type=float, default=1e-4)
-    parser.add_argument("--joint2gen_lr", type=float, default=1e-4)
+    parser.add_argument("--gen2joint_lr", type=float, default=1e-3)
+    parser.add_argument("--joint2gen_lr", type=float, default=1e-3)
     parser.add_argument("--weight_decay", type=float, default=0)
     # model config
     parser.add_argument("--molecule_type", type=str, default="2DGraph", choices=["2DGraph", "3DGraph", "SMILES", "all"])
-    parser.add_argument("--repr_frozen", dest='repr_frozen', action='store_true')
-    parser.add_argument('--no_repr_frozen', dest='repr_frozen', action='store_false')
-    parser.set_defaults(repr_frozen=False)
     parser.add_argument("--mol_branch", dest='mol_branch', action='store_true')
     parser.add_argument('--no_mol_branch', dest='mol_branch', action='store_false')
     parser.set_defaults(mol_branch=True)
@@ -251,7 +248,7 @@ if __name__ == "__main__":
     parser.add_argument('--gen2joint_projector_path', type=str, default='ckpt/mol_align/gen2joint_projector.pth')
     parser.add_argument('--joint2gen_projector_path', type=str, default='ckpt/mol_align/joint2gen_projector.pth')
     # save config
-    parser.add_argument("--store_dir", type=str, default="ckpt/mol_align")
+    parser.add_argument("--store_dir", type=str, default="ckpt/MolAlign/edit_1st_step")
     parser.add_argument("--save_freq", type=int, default=4000)
     # contrastive SSL config
     parser.add_argument("--SSL_loss", type=str, default="MSELoss", choices=["EBM_NCE", "InfoNCE", "MSELoss"])

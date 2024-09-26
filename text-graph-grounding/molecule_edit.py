@@ -257,7 +257,7 @@ if __name__ == "__main__":
     parser.add_argument('--gen2joint_projector_path', type=str, default='ckpt/mol_align/gen2joint_projector.pth')
     parser.add_argument('--joint2gen_projector_path', type=str, default='ckpt/mol_align/joint2gen_projector.pth')
     # save config
-    parser.add_argument("--store_dir", type=str, default="ckpt/mol_align")
+    parser.add_argument("--store_dir", type=str, default="ckpt/MolAlign/edit_2nd_step")
     parser.add_argument("--save_freq", type=int, default=4000)
     # molecular edit task config
     parser.add_argument('--l2_lambda_list', nargs='+', type=float, default=[1e1, 1e0, 1e-1, 1e-2, 1e-3])

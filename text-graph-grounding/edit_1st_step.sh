@@ -1,0 +1,12 @@
+python3 space_projector_train.py \
+    --molecule_type 2DGraph \
+    --epoch_num 100 \
+    --gen2joint_lr 1e-2 \
+    --joint2gen_lr 1e-2 \
+    --resume \
+    --mol_model_path ckpt/MolAlign/pretrain/2DGraph_gin-Sep-25-2024_17-50-40/best_molecule_model.pth \
+    --mol_projector_path ckpt/MolAlign/pretrain/2DGraph_gin-Sep-25-2024_17-50-40/best_mol2latent.pth \
+    --data_dir data/ZINC250k \
+    --batch_size 32 \
+    --seed 42 \
+    --gpu 1
