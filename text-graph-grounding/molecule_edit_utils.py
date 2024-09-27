@@ -86,10 +86,10 @@ Glutathione_SMILES = "NC(CCC(=O)NC(CS)C(=O)NCC(=O)O)C(=O)O"
 def get_edit_SMILES_list(args):
     SMILES_list = []
     if args.test:
-        if args.input_SMILES is not None:
-            SMILES_list.append(args.input_SMILES)
+        if args.edit_SMILES is not None:
+            SMILES_list.append(args.edit_SMILES)
     else:
-        f = open(args.input_SMILES_file, 'r')
+        f = open(args.edit_SMILES_filepath, 'r')
         lines = f.readlines()
         for line in lines:
             SMILES = line.strip()
@@ -101,14 +101,14 @@ def get_edit_SMILES_list(args):
 def get_edit_prompt_list(args):
     description_list = []
     if args.test:
-        if args.input_description is not None:
+        if args.edit_prompt is not None:
             description_list.append(args.input_description)
     else:
-        if args.input_description_id not in DESCRIPTION_DICT.keys():
+        if args.edit_task_id not in DESCRIPTION_DICT.keys():
             raise ValueError
         else:
-            print("Use {} descrition.".format(args.input_description_id))
-            description_list.append(DESCRIPTION_DICT[args.input_description_id])
+            print("Use {} descrition.".format(args.edit_task_id))
+            description_list.append(DESCRIPTION_DICT[args.edit_task_id])
     return description_list
 
 

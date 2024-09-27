@@ -87,7 +87,7 @@ def cl_loss(s_features, t_features, args):
         pred = logits.argmax(dim=1, keepdim=False)
         CL_acc = pred.eq(labels).sum().detach().cpu().item() * 1. / B
 
-    elif args.SSL_loss == 'MESLoss':
+    elif args.SSL_loss == 'MSELoss':
         criterion = nn.MSELoss()
         CL_loss = criterion(X, Y)
         CL_acc = 0
@@ -119,10 +119,9 @@ def main(args):
     seed_all(args.seed)
     device = torch.device("cuda:{}".format(args.gpu) if torch.cuda.is_available() else "cpu")
     print("device:", device)
-    model_save_dir = osp.join(args.store_dir, f"mol_edit_1step{args.molecule_type}-{get_local_time()}")
+    model_save_dir = osp.join(args.store_dir, f"{args.molecule_type}_{args.gnn_type}_lr{args.gen2joint_lr}-{get_local_time()}")
     logger = Logger(osp.join(model_save_dir, "log"), args.time_log)
     writer = SummaryWriter(osp.join(model_save_dir, "tensorboard"))
-
     # load model
     if args.gen_model == "MegaMolBART":
         gen_model_wrapper = MegaMolBART(vocab_path=args.vocab_path, input_dir=args.gen_model_dir, output_dir=None)
@@ -149,11 +148,12 @@ def main(args):
     trainset = ZINC250K_Graph(args.data_dir)
     train_loader = pyg_DataLoader(trainset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
 
+    logger.log(f"gen2joint_lr: {args.gen2joint_lr}, joint2gen_lr: {args.joint2gen_lr}")
     model_param_group = [
         {"params": gen2joint_projector.parameters(), "lr": args.gen2joint_lr},
         {"params": joint2gen_projector.parameters(), "lr": args.joint2gen_lr},
     ]
-    optimizer = optim.Adam(model_param_group, weight_decay=args.decay)
+    optimizer = optim.Adam(model_param_group, weight_decay=args.weight_decay)
 
     optimal_loss = sys.maxsize
     for epoch_id in range(args.epoch_num):
@@ -184,15 +184,16 @@ def main(args):
             optimizer.step()
 
             if (epoch_id * len(train_loader) + i_batch) % args.log_freq == 0:
-                logger.log("{} epoch {}th batch loss in :{}".format(epoch_id + 1, i_batch, loss / args.batch_size))
-                writer.add_scalar("Train_Loss/batch", loss / args.batch_size, epoch_id * len(train_loader) + i_batch)
-            if (epoch_id * len(train_loader) + i_batch) % args.save_freq == 0:
-                save_model(model_save_dir, f"epoch{epoch_id}_batch{i_batch}", gen2joint_projector, joint2gen_projector)
+                logger.log("{} epoch {}th batch loss in :{}".format(epoch_id + 1, i_batch, loss))
+                writer.add_scalar("Train_Loss/batch", loss, epoch_id * len(train_loader) + i_batch)
+            # if (epoch_id * len(train_loader) + i_batch) % args.save_freq == 0:
+            #     save_model(model_save_dir, f"epoch{epoch_id}_batch{i_batch}", gen2joint_projector, joint2gen_projector)
             epoch_loss += loss / len(train_loader)
 
         logger.log("{}th epoch mean loss:{}".format(epoch_id + 1, epoch_loss))
         writer.add_scalar("Train_Loss/epoch", epoch_loss, epoch_id + 1)
-        save_model(model_save_dir, f"epoch{epoch_id}", gen2joint_projector, joint2gen_projector)
+        if (epoch_id + 1) % args.save_freq == 0:
+            save_model(model_save_dir, f"epoch{epoch_id}", gen2joint_projector, joint2gen_projector)
         if epoch_loss < optimal_loss:
             optimal_loss = epoch_loss
             save_model(model_save_dir, "best", gen2joint_projector, joint2gen_projector)
@@ -249,7 +250,7 @@ if __name__ == "__main__":
     parser.add_argument('--joint2gen_projector_path', type=str, default='ckpt/mol_align/joint2gen_projector.pth')
     # save config
     parser.add_argument("--store_dir", type=str, default="ckpt/MolAlign/edit_1st_step")
-    parser.add_argument("--save_freq", type=int, default=4000)
+    parser.add_argument("--save_freq", type=int, default=10, help="according to epoch")
     # contrastive SSL config
     parser.add_argument("--SSL_loss", type=str, default="MSELoss", choices=["EBM_NCE", "InfoNCE", "MSELoss"])
     parser.add_argument("--CL_neg_samples", type=int, default=1)

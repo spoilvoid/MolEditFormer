@@ -6,17 +6,16 @@ import numpy as np
 import argparse
 from tqdm import tqdm
 import time
-import copy
+import json
 
 import torch
 import torch.nn as nn
 from torch import optim
 import torch.nn.functional as F
-from torch.utils.tensorboard import SummaryWriter
 
 from models import CLIP, MegaMolBART, MLP
 from molecule_edit_utils import load_space_projector, get_edit_SMILES_list, get_edit_prompt_list, evaluate_SMILES_list
-from basic_utils import get_local_time, freeze_network, seed_all, Logger
+from basic_utils import get_local_time, seed_all, default_dump
 
 
 def clip_loss_for_edit(molecule_repr, text_repr):
@@ -110,8 +109,8 @@ def main(args):
     seed_all(args.seed)
     device = torch.device("cuda:{}".format(args.gpu) if torch.cuda.is_available() else "cpu")
     print("device:", device)
-    logger = Logger(osp.join(args.store_dir, "log"), args.time_log)
-    writer = SummaryWriter(osp.join(args.store_dir, "tensorboard"))
+    if not osp.exists(args.store_dir):
+        os.makedirs(args.store_dir)
 
     # load model
     if args.gen_model == "MegaMolBART":
@@ -133,44 +132,42 @@ def main(args):
     
     print("\n\n\nstart editing\n\n\n")
 
-    source_SMILES_list = get_edit_SMILES_list(args)
-    description_list = get_edit_prompt_list(args)
-
-    for description in description_list:
-        print(f"edit task description: {description}")
-        result_SMILES_list, result_acc_list = [], []
-        for SMILES in source_SMILES_list:
-            print(f"edit input: {SMILES}")
-            text_list = [description]
+    edit_SMILES_list = get_edit_SMILES_list(args)
+    prompt_list = get_edit_prompt_list(args)
+    result_dict = {}
+    for prompt in prompt_list:
+        result_dict[prompt] = {}
+        print(f"edit task description: {prompt}")
+        success_count = 0
+        for smi in edit_SMILES_list:
+            result_dict[prompt][smi] = {}
+            print(f"edit input: {smi}")
+            text_list = [prompt]
             text2joint_repr = text_branch_model.encode_text_from_pretrain_model(text_list, device)
 
             # 将输入SMILES在MegaMolBART中的latent作为被解码的latent
-            latent_code_init, pad_mask_init = gen_model_wrapper.smileslist2embedding([SMILES])  # [pad, B, d], [pad, B]
+            latent_code_init, pad_mask_init = gen_model_wrapper.smileslist2embedding([smi])  # [pad, B, d], [pad, B]
             regenerated_mol = gen_model_wrapper.inverse_transform([latent_code_init], pad_mask_init.bool().cuda(), k=1, sanitize=True)[0]
-
-            result_SMILES_list_one_pair, result_eval_list_one_pair = [], []
-            
+            success_flag = False
             for l2_lambda in args.l2_lambda_list:
                 print("l2 lambda: {}".format(l2_lambda))
-                # 记录优化历程中的SMILES，第一个为输入SMILES，第二个为未经过latent optimization直接解码的SMILES
-                current_SMILES_list = [SMILES, regenerated_mol]
+                # 记录优化历程中的SMILES，第一个为输入SMILES，第二个为未经过latent optimization直接解码的SMILES，后面的为不同l2_lambda下进行学习后解码得到的SMILES
+                current_SMILES_list = [smi, regenerated_mol]
 
                 latent = latent_code_init.detach().clone()
-                if args.use_noise_for_init:
+                if args.init_noise:
                     print("Use random noise for init")
                     random_noise = torch.randn(latent_code_init.size()).to(device)
                     latent += random_noise
-                else:
-                    print("No random noise for init")
                 latent.requires_grad = True
 
                 pad_mask = pad_mask_init.detach().clone()
 
                 optimizer = optim.Adam([latent], lr=args.lr)
 
-                for epoch_id in tqdm(range(args.epochs)):
+                for epoch_id in tqdm(range(args.epoch_num)):
                     # 学习率在前段不变，后段呈现余弦退火
-                    t = epoch_id / args.epochs
+                    t = epoch_id / args.epoch_num
                     lr = get_lr(t, args.lr)
                     optimizer.param_groups[0]["lr"] = lr
 
@@ -179,8 +176,8 @@ def main(args):
                         latent2gen_repr = F.normalize(latent2gen_repr, dim=-1)
                     gen2joint_repr = gen2joint_projector(latent2gen_repr)
 
-                    clip_loss_ = clip_loss_for_edit(gen2joint_repr, text2joint_repr)
-                    loss = clip_loss_ + l2_lambda * nn.MSELoss(latent_code_init, latent)
+                    clip_loss = clip_loss_for_edit(gen2joint_repr, text2joint_repr)
+                    loss = clip_loss + l2_lambda * nn.MSELoss()(latent_code_init, latent)
                     # l2_loss_ =  l2_lambda * ((latent_code_init - latent) ** 2).mean()
                     # loss = clip_loss_ + l2_loss_
 
@@ -188,59 +185,50 @@ def main(args):
                     loss.backward(retain_graph=True)
                     optimizer.step()
 
-                print(F"final loss: {loss.item()}")
+                print(F"final MSELoss: {loss.item()}")
 
                 generated_mols = gen_model_wrapper.inverse_transform([latent], pad_mask.bool().cuda(), k=1, sanitize=True)
                 current_SMILES_list.append(generated_mols[0])
-
-                result_SMILES_list_one_pair.append([description] + current_SMILES_list + ['{}'.format(l2_lambda)])
-
-                current_result_list = evaluate_SMILES_list(current_SMILES_list, description)
-                result_eval_list_one_pair.append(current_result_list)
-            
-            result_eval_list_one_pair = np.array(result_eval_list_one_pair)
-            result_eval_list_one_pair = np.any(result_eval_list_one_pair, axis=0, keepdims=True)
-            print("result_eval_list_one_pair\n", result_eval_list_one_pair)
-
-
-            result_SMILES_list_, result_acc_list_ = check_edit(SMILES, description, args.l2_lambda_list, gen_model_wrapper, text_branch_model, gen2joint_projector, device)
-            result_SMILES_list.extend(result_SMILES_list_)
-            result_acc_list.append(result_acc_list_)
-            print("\n\n\n")
-        
-        result_acc_list = np.concatenate(result_acc_list, axis=0)
-        result_acc_list = np.sum(result_acc_list, axis=0)
-        result_acc_list = 100. * result_acc_list / len(source_SMILES_list)
-        result_acc_row = '\t'.join(['{}'.format(x) for x in result_acc_list])
-        print("===== Accuracy =====\t{}".format(result_acc_row))
+                # evaluate_SMILES_list输入一个SMILES列表，返回一个bool列表，表示每个SMILES是否符合prompt的要求，输出是[True]或[False]
+                current_result_list = evaluate_SMILES_list(current_SMILES_list, prompt)
+                if current_result_list[0]:
+                    success_flag = True
+                result_dict[prompt][smi][l2_lambda] = {
+                    "output": current_SMILES_list[2],
+                    "result": current_result_list[0]
+                }
+            if success_flag:
+                success_count += 1
+        result_dict[prompt]["success_count"] = success_count
+        result_dict[prompt]["success_rate"] = success_count / len(edit_SMILES_list)
 
         if args.store_dir is not None:
-            saver_file = os.path.join(args.output_model_dir, "edited_SMILES.tsv")
-            with open(saver_file, 'a') as f:
-                for row in result_SMILES_list:
-                    row = "\t".join(row)
-                    print(row, file=f)
-
-            saver_file = os.path.join(args.output_model_dir, "accuracy")
-            np.savez(saver_file, result_acc_list)
-
+            save_filename = f"{args.edit_task_id}_result.json"
+            json_str = json.dumps(result_dict, ensure_ascii=False, default=default_dump)
+            with open(os.path.join(args.store_dir, save_filename), 'w', encoding='utf-8') as file:
+                file.write(json_str)
+            file.close()
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    # log config
-    parser.add_argument("--time_log", type=bool, default=True)
-    parser.add_argument("--log_freq", type=int, default=1000)
-    # dataset config
-    parser.add_argument("--data_dir", type=str, default="data/PubChemEdit")
-    # dataloader config
-    parser.add_argument("--batch_size", type=int, default=32)
-    parser.add_argument("--num_workers", type=int, default=8)
+    # edit data config
+    parser.add_argument('--l2_lambda_list', nargs='+', type=float, default=[1e1, 1e0, 1e-1, 1e-2, 1e-3])
+    parser.add_argument("--edit_task_id", type=int, default=None)
+    parser.add_argument("--edit_SMILES_filepath", type=str, default="data/EditBenchmark/edit_SMILES.txt")
+    parser.add_argument("--test", action="store_true")
+    parser.add_argument("--edit_SMILES", type=str, default=None)
+    parser.add_argument("--edit_prompt", type=str, default=None)
     # train config
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--gpu", type=int, default=1)
-    parser.add_argument("--epoch_num", type=int, default=100, help="epoch number")
-    parser.add_argument("--weight_decay", type=float, default=0)
+    # model config
+    parser.add_argument("--mol_branch", dest='mol_branch', action='store_true')
+    parser.add_argument('--no_mol_branch', dest='mol_branch', action='store_false')
+    parser.set_defaults(mol_branch=False)
+    parser.add_argument("--text_branch", dest='text_branch', action='store_true')
+    parser.add_argument('--no_text_branch', dest='text_branch', action='store_false')
+    parser.set_defaults(text_branch=True)
     # fixed generation model config
     parser.add_argument('--gen_model', type=str, default="MegaMolBART", choices=["MegaMolBART"])
     parser.add_argument("--vocab_path", type=str, default="bart_vocab.txt")
@@ -252,20 +240,17 @@ if __name__ == "__main__":
     parser.add_argument("--SSL_emb_dim", type=int, default=256)
     # load config
     parser.add_argument("--gen_model_dir", type=str, default="ckpt/MegaMolBART/checkpoints")
+    parser.add_argument("--resume", dest='resume', action='store_true')
+    parser.add_argument('--no_resume', dest='resume', action='store_false')
+    parser.set_defaults(resume=True)
+    parser.add_argument('--text_pretrain_dir', type=str, default='ckpt/SciBERT')
     parser.add_argument('--text_model_path', type=str, default='ckpt/mol_align/text_model.pth')
     parser.add_argument('--text_projector_path', type=str, default='ckpt/mol_align/text_projector.pth')
     parser.add_argument('--gen2joint_projector_path', type=str, default='ckpt/mol_align/gen2joint_projector.pth')
     parser.add_argument('--joint2gen_projector_path', type=str, default='ckpt/mol_align/joint2gen_projector.pth')
     # save config
     parser.add_argument("--store_dir", type=str, default="ckpt/MolAlign/edit_2nd_step")
-    parser.add_argument("--save_freq", type=int, default=4000)
     # molecular edit task config
-    parser.add_argument('--l2_lambda_list', nargs='+', type=float, default=[1e1, 1e0, 1e-1, 1e-2, 1e-3])
-    parser.add_argument("--edit_task_id", type=int, default=None)
-    parser.add_argument("--edit_SMILES_filepath", type=str, default="data/EditBenchmark/edit_SMILES.txt")
-    parser.add_argument("--test", action="store_true")
-    parser.add_argument("--input_SMILES", type=str, default=None)
-    parser.add_argument("--input_description", type=str, default=None)
     parser.add_argument("--init_noise", dest="init_noise", action="store_true")
     parser.add_argument("--no_init_noise", dest="init_noise", action="store_false")
     parser.set_defaults(init_noise=False)
@@ -273,7 +258,12 @@ if __name__ == "__main__":
     parser.add_argument('--no_normalize', dest='normalize', action='store_false')
     parser.set_defaults(normalize=True)
     parser.add_argument("--lr", type=float, default=0.1)
+    parser.add_argument("--epoch_num", type=int, default=100)
 
     args = parser.parse_args()
 
+    start = time.perf_counter()
     main(args)
+    
+    end = time.perf_counter()
+    print("time consuming {:.2f}".format(end - start))
