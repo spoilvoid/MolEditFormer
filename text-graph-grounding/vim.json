@@ -1,0 +1,96 @@
+{
+    "CID": 5743,
+    "Name": [
+        "Neofordex (EMEA/H/C/004071)",
+        "Glucocorticoids",
+        "Anti-Inflammatory Agents",
+        "DEXAMETHASONE INTENSOL",
+        "Dexamethasone",
+        "DEXAMETHASONE 1.5 MG",
+        "DEXAMETHASONE",
+        "dexamethasone",
+        "Antineoplastic Agents, Hormonal",
+        "Antiemetics",
+        "DEXAMETHAZONE",
+        "Ozurdex (EMEA/H/C/001140)"
+    ],
+    "RDKit_CanSmiles": "CC1CC2C3CCC4=CC(=O)C=CC4(C)C3(F)C(O)CC2(C)C1(O)C(=O)CO",
+    "RDKit_IsoSmiles": "C[C@@H]1C[C@H]2[C@@H]3CCC4=CC(=O)C=C[C@]4(C)[C@@]3(F)[C@@H](O)C[C@]2(C)[C@@]1(O)C(=O)CO",
+    "PubChem_CanSmiles": "CC1CC2C3CCC4=CC(=O)C=CC4(C3(C(CC2(C1(C(=O)CO)O)C)O)F)C",
+    "PubChem_IsoSmiles": "C[C@@H]1C[C@H]2[C@@H]3CCC4=CC(=O)C=C[C@@]4([C@]3([C@H](C[C@@]2([C@]1(C(=O)CO)O)C)O)F)C",
+    "IUPAC": "(8S,9R,10S,11S,13S,14S,16R,17R)-9-fluoro-11,17-dihydroxy-17-(2-hydroxyacetyl)-10,13,16-trimethyl-6,7,8,11,12,14,15,16-octahydrocyclopenta[a]phenanthren-3-one",
+    "InChI": "InChI=1S/C22H29FO5/c1-12-8-16-15-5-4-13-9-14(25)6-7-19(13,2)21(15,23)17(26)10-20(16,3)22(12,28)18(27)11-24/h6-7,9,12,15-17,24,26,28H,4-5,8,10-11H2,1-3H3/t12-,15+,16+,17+,19+,20+,21+,22+/m1/s1",
+    "InChIKey": "UREBDLICKHMUKA-CXSFZGCWSA-N",
+    "Description": {
+        "MolecularStructure/Classification": "The molecule is a fluorinated steroid that is 9-fluoropregna-1,4-diene substituted by hydroxy groups at positions 11, 17 and 21, a methyl group at position 16 and oxo groups at positions 3 and 20. The molecule is a synthetic member of the class of glucocorticoids. The molecule is a fluorinated steroid, a 3-oxo-Delta(1),Delta(4)-steroid, a glucocorticoid, a 20-oxo steroid, an 11beta-hydroxy steroid, a 17alpha-hydroxy steroid and a 21-hydroxy steroid. The molecule is fluorinated at position 9. Developed in 1957, the molecule is structurally similar to other corticosteroids. The molecule is a synthetic adrenal corticosteroid.",
+        "FunctionalGroups": "The molecule has 1 halogens groups. The molecule has 3 side-chain hydroxyls groups. The molecule has 2 side-chain aldehydes or ketones groups. The molecule has no carbonyl methyl groups. The molecule has no primary amines groups. The molecule has no terminal azo groups.",
+        "PhysicalProperty/ChemicalProperty": "The molecule is an odorless white to off-white crystalline powder with a slightly bitter taste. The solubility of the molecule is Less than 1 mg/mL at 77 °F. When heated to decomposition it emits toxic fumes of. The topological polar surface area of the molecule is 94.8 Å².",
+        "BiologicalProperty/PharmacologicalEffect": "The molecule has a role as an adrenergic agent, an antiemetic, an antineoplastic agent, an environmental contaminant, a xenobiotic, an immunosuppressive agent and an anti-inflammatory drug. The molecule is an anti-inflammatory. The molecule has potent anti-inflammatory properties. The molecule interferes with NF-kB activation. The molecule interferes with apoptotic pathways. The molecule lacks the salt-retaining properties of other related adrenal hormones.",
+        "Pharmacology/Biochemistry": "The molecule binds to the glucocorticoid receptor, inhibiting pro-inflammatory signals, and promoting anti-inflammatory signals. The molecule's duration of action varies depending on the route. The molecule is absorbed via the intramuscular route slower than via the intravenous route. A 3mg intramuscular dose of the molecule reaches a Cmax of 34.6±6.0ng/mL with a Tmax of 2.0±1.2h and an AUC of 113±38ng*h/mL. A 1.5mg oral dose of the molecule reaches a Cmax of 13.9±6.8ng/mL with a Tmax of 2.0±0.5h and an AUC of 331±50ng*h/mL. The molecule is approximately 70-78% bioavailable in healthy subjects when taken orally. The molecule is generally eliminated predominantly in the urine. However, the molecule is <10% eliminated in urine. The molecule's short term effects are decreased vasodilation and permeability of capillaries, as well as decreased leukocyte migration to sites of inflammation. The molecule binding to the glucocorticoid receptor mediates changes in gene expression that lead to multiple downstream effects over hours to days. The molecule inhibits neutrophil apoptosis and demargination; it inhibits phospholipase A2, which decreases the formation of arachidonic acid derivatives; it inhibits NF-Kappa B and other inflammatory transcription factors; it promotes anti-inflammatory genes like interleukin-10. High doses of the molecule for an extended period bind to the mineralocorticoid receptor, raising sodium levels and decreasing potassium levels.",
+        "Hazard": "",
+        "MedicalApplication/DosageForm": "The mechanism of action of the molecule is as a Corticosteroid Hormone Receptor Agonist. The molecule is used to treat endocrine, rheumatic, collagen, dermatologic, allergic, ophthalmic, gastrointestinal, respiratory, hematologic, neoplastic, edematous, and other conditions. The molecule reduced deaths by approximately one third in patients requiring ventilation.",
+        "IndustrialApplication": "",
+        "MolecularSource": "The molecule is a natural product found in Aspergillus ochraceopetaliformis, Penicillium chrysogenum, and other organisms with data available.",
+        "ResearchStatus/ApprovalStatus": "The molecule was granted FDA approval on 30 October 1958. The molecule was recommended for use in COVID-19 patients with severe respiratory symptoms.",
+        "Others": ""
+    }
+}
+{
+    "CID": 1,
+    "Name": [
+        "Acetylcarnitine",
+        "O-acetylcarnitine",
+        "Nootropic Agents",
+        "Vitamin B Complex",
+        "L-Acetylcarnitine"
+    ],
+    "RDKit_CanSmiles": "CC(=O)OC(CC(=O)[O-])C[N+](C)(C)C",
+    "RDKit_IsoSmiles": "CC(=O)OC(CC(=O)[O-])C[N+](C)(C)C",
+    "PubChem_CanSmiles": "CC(=O)OC(CC(=O)[O-])C[N+](C)(C)C",
+    "PubChem_IsoSmiles": "CC(=O)OC(CC(=O)[O-])C[N+](C)(C)C",
+    "IUPAC": "3-acetyloxy-4-(trimethylazaniumyl)butanoate",
+    "InChI": "InChI=1S/C9H17NO4/c1-7(11)14-8(5-9(12)13)6-10(2,3)4/h8H,5-6H2,1-4H3",
+    "InChIKey": "RDHQFKQIGNGIED-UHFFFAOYSA-N",
+    "Description": {
+        "MolecularStructure/Classification": "The molecule is an O-acylcarnitine having acetyl as the acyl substituent. In human plasma and tissues, the molecule is the most predominant acylated ester of carnitine. The molecule is an acetic acid ester of Carnitine.",
+        "FunctionalGroups": "The molecule has 1 carboxylic acids groups. The molecule has 1 terminal aldehyde groups. The molecule has 1 carbonyl methyl groups. The molecule has 1 side-chain hydroxyls groups. The molecule has 2 side-chain aldehydes or ketones groups. The molecule has no methyl sulfinyl groups. The molecule has no cyano groups. The molecule has no sulfonyl chloride groups.",
+        "PhysicalProperty/ChemicalProperty": "The molecule is Very soluble in water and alcohol. The topological polar surface area of the molecule is 66.4 Å².",
+        "BiologicalProperty/PharmacologicalEffect": "The main role of the molecule is to help transport fatty acids into the mitochondrial matrix where fatty acid metabolism occurs. The molecule has a role as a human metabolite. The molecule facilitates movement of Acetyl CoA into the matrices of mammalian Mitochondrion during the oxidation of Fatty acids.",
+        "Pharmacology/Biochemistry": "The molecule supplements are absorbed in a similar manner to L-carnitine. Both of which are eliminated by the kidneys and involve tubular secretion. The molecule has not been fully elucidated, but it seems that the main role of the molecule is to donate an acetyl group during fatty acid metabolism to help transport fatty acids, such as Acetyl CoA, into the mitochondrial matrix where fatty acid metabolism occurs. One study has also mentioned a role for the molecule as an antioxidant.",
+        "Hazard": "",
+        "MedicalApplication/DosageForm": "",
+        "IndustrialApplication": "",
+        "MolecularSource": "The molecule is a metabolite found in or produced by Saccharomyces cerevisiae. Carnitine is an amino acid derivative that is made in the kidney, liver, and brain from lysine and methionine.",
+        "ResearchStatus/ApprovalStatus": "The molecule is an investigational drug in the United states, Italy, United Kingdom, China, Israel, and Norway, and the molecule is approved in Italy, Portugal, Argentina, Chile, Philippines, Australia, and India.",
+        "Others": "The molecule is functionally related to an acetic acid."
+    }
+}
+
+{
+    "CID": 13,
+    "Name": [
+        "1,2,4-trichlorobenzene",
+        "1,2,4-Trichlorobenzene",
+        "1,2,4-TRICHLOROBENZENE"
+    ],
+    "RDKit_CanSmiles": "Clc1ccc(Cl)c(Cl)c1",
+    "RDKit_IsoSmiles": "Clc1ccc(Cl)c(Cl)c1",
+    "PubChem_CanSmiles": "C1=CC(=C(C=C1Cl)Cl)Cl",
+    "PubChem_IsoSmiles": "C1=CC(=C(C=C1Cl)Cl)Cl",
+    "IUPAC": "1,2,4-trichlorobenzene",
+    "InChI": "InChI=1S/C6H3Cl3/c7-4-1-2-5(8)6(9)3-4/h1-3H",
+    "InChIKey": "PBKONEOXTCPAFI-UHFFFAOYSA-N",
+    "Description": {
+        "MolecularStructure/Classification": "The molecule is a trichlorobenzene with chloro substituents at positions 1, 2 and 4. The molecule is an aromatic compound. The molecule is one of the three isomeric forms of trichlorobenzene.",
+        "FunctionalGroups": "The molecule has 3 halogens groups. The molecule has no methyl sulfonyl groups. The molecule has no ethoxy groups. The molecule has no Imines groups.",
+        "PhysicalProperty/ChemicalProperty": "The molecule appears as colorless liquid or white solid with a sharp chlorobenzene odor. The molecule has a melting point of 16.95 °C (62.5 °F). The molecule has an aromatic odor. The solubility of the molecule is Less than 1 mg/mL at 70 °F. The molecule is 1.454 times denser than water at 68 °F. When heated to decomp, it emits toxic fumes of. The LogP of the molecule is 4.02. The topological polar surface area of the molecule is 0 Å².",
+        "BiologicalProperty/PharmacologicalEffect": "Chronic oral exposure has been observed to result in increased adrenal weights and vacuolization of the zona fasciculata in the cortex in rats. The molecule is not classified as human carcinogenicity.",
+        "Pharmacology/Biochemistry": "The molecule was exposed to (14)C-labeled 1,2,4-trichlorobenzene for 8 hr in a static exposure (0.018 mg/L) or for 35 days in a continuous-flow exposure (0.20 mg/L) followed by a subsequent elimination period. For 2 days after 8 hr exposure, the half-time of elimination of (14)C from muscle & liver was 0.4 days, while after 35 day exposure an early rapid elimination of (14)C from these tissues (half-time= 0.4 days) was followed by slower elimination (half-time= 50 days) during days 4-36.",
+        "Hazard": "Local irritation of the lungs and dyspnea have been reported in animals following acute inhalation exposure.",
+        "MedicalApplication/DosageForm": "",
+        "IndustrialApplication": "The molecule is used as a solvent.",
+        "MolecularSource": "The molecule may occur from inhalation during its manufacture and use.",
+        "ResearchStatus/ApprovalStatus": "No information is available on the acute (short-term), chronic (long-term), reproductive, developmental, and carcinogenic effects of the molecule in humans.",
+        "Others": ""
+    }
+},

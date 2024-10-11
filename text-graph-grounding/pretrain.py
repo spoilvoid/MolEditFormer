@@ -114,7 +114,7 @@ def main(args):
     # in_g = Data(x=node_f, edge_index=edge_index).to(device)
     # dataset = MolGraphDataset(args.graph_root)
 
-    train_set = PubChemEdit(args.data_dir)
+    train_set = PubChemEdit(args.data_dir, mode=args.mode, can_smiles=args.can_smiles)
     train_loader = pyg_DataLoader(train_set, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
     if args.repr_frozen:
         freeze_network(model.text_model)
@@ -145,8 +145,8 @@ def main(args):
     optimizer = optim.Adam(model_param_group, weight_decay=args.weight_decay)
 
 
-    optimal_loss = sys.maxsize
-    for epoch_id in range(args.epoch_num):
+    optimal_loss = args.loss_threshold
+    for epoch_id in range(args.start_epoch, args.epoch_num):
         epoch_loss = 0.0
         for i_batch, sample_batched in tqdm(enumerate(train_loader), disable=False, total=len(train_loader)):
             # load data from dataloader
@@ -212,13 +212,16 @@ if __name__ == "__main__":
     parser.add_argument("--time_log", type=bool, default=True)
     parser.add_argument("--log_freq", type=int, default=1000)
     # dataset config
-    parser.add_argument("--data_dir", type=str, default="data/PubChemEdit")
+    parser.add_argument("--data_dir", type=str, default="data/PubChemEdit/version_0")
+    parser.add_argument("--mode", type=str, default="full", choices=["full", "main", "expand"])
+    parser.add_argument("--can_smiles", action="store_true")
     # dataloader config
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--num_workers", type=int, default=8)
     # train config
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--gpu", type=int, default=1)
+    parser.add_argument("--start_epoch", type=int, default=0)
     parser.add_argument("--epoch_num", type=int, default=32, help="epoch number")
     parser.add_argument("--text_lr", type=float, default=1e-4)
     parser.add_argument("--graph_lr", type=float, default=1e-5)
@@ -262,6 +265,7 @@ if __name__ == "__main__":
     # save config
     parser.add_argument("--store_dir", type=str, default="ckpt/MolAlign/pretrain")
     parser.add_argument("--save_freq", type=int, default=4000)
+    parser.add_argument("--loss_threshold", type=float, default=sys.maxsize)
     # contrastive SSL config
     parser.add_argument("--SSL_loss", type=str, default="EBM_NCE", choices=["EBM_NCE", "InfoNCE"])
     parser.add_argument("--CL_neg_samples", type=int, default=1)

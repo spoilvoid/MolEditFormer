@@ -1,0 +1,13 @@
+python3 text_retrieval.py \
+    --resume \
+    --text_model_path ckpt/MolAlign/pretrain/2DGraph_gin-Sep-26-2024_20-03-09/epoch31_text_model.pth \
+    --text_projector_path ckpt/MolAlign/pretrain/2DGraph_gin-Sep-26-2024_20-03-09/epoch31_text2latent.pth \
+    --mol_model_path ckpt/MolAlign/pretrain/2DGraph_gin-Sep-26-2024_20-03-09/epoch31_molecule_model.pth \
+    --mol_projector_path ckpt/MolAlign/pretrain/2DGraph_gin-Sep-26-2024_20-03-09/epoch31_mol2latent.pth \
+    --data_dir data/DrugBank/retrieval \
+    --split full \
+    --task molecule_description_removed_PubChem \
+    --store_dir ckpt/MolAlign/DrugBank_retrieval \
+    --batch_size 64 \
+    --seed 42 \
+    --gpu 0

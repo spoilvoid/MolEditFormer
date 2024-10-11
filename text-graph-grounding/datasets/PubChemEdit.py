@@ -15,9 +15,14 @@ from torch_geometric.data import Data, InMemoryDataset
 from . import dataset_utils
 
 
+DESCRIPTION_MODE = ["full", "main", "expand"]
+
+
 class PubChemEdit(InMemoryDataset):
-    def __init__(self, root, subset_size=None, transform=None, pre_transform=None, pre_filter=None, default_filenum=32):
-        self.root = root
+    def __init__(self, root, mode="full", can_smiles=True, transform=None, pre_transform=None, pre_filter=None, default_filenum=32):
+        self.root = os.path.join(root, mode)
+        self.mode = mode
+        self.can_smiles = can_smiles
 
         # only for `process` function
         self.SDF_filepath = os.path.join(self.root, "raw/structures.sdf.gz")
@@ -27,7 +32,7 @@ class PubChemEdit(InMemoryDataset):
         self.description_filepath = os.path.join(self.root, "processed/description.csv")
         
         # using InMemoryDataset.process to process smiles data to graph data
-        super(PubChemEdit, self).__init__(root, transform, pre_transform, pre_filter)
+        super(PubChemEdit, self).__init__(self.root, transform, pre_transform, pre_filter)
 
         SMILES_df = pd.read_csv(self.SMILES_filepath)
         description_df = pd.read_csv(self.description_filepath)
@@ -53,9 +58,17 @@ class PubChemEdit(InMemoryDataset):
             file.close()
             for item in tqdm(data):
                 self.CID_list.append(int(item["CID"]))
-                self.SMILES_list.append(item["RDKit_IsoSmiles"])
+                if self.can_smiles:
+                    self.SMILES_list.append(item["RDKit_CanSmiles"])
+                else:
+                    self.SMILES_list.append(item["RDKit_IsoSmiles"])
                 
-                raw_descriptions = [desc for label, desc in item["Description"].items() if desc != "" and label not in ["Pharmacology/Biochemistry", "Others"]]
+                if self.mode == "full":
+                    raw_descriptions = [desc for label, desc in item["Description"].items() if desc != "" and label not in ["Pharmacology/Biochemistry", "Others"]]
+                elif self.mode == "main":
+                    raw_descriptions = [desc for label, desc in item["Description"].items() if desc != "" and label in ["MolecularStructure/Classification", "FunctionalGroups", "PhysicalProperty/ChemicalProperty", "BiologicalProperty/PharmacologicalEffect"]]
+                else:
+                    raise ValueError(f"Invalid mode: {self.mode}")
                 self.description_list.append(" ".join(raw_descriptions))
         
         # save extra no-graph data
