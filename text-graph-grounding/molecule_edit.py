@@ -14,8 +14,8 @@ from torch import optim
 import torch.nn.functional as F
 
 from models import CLIP, MegaMolBART, MLP
-from molecule_edit_utils import load_space_projector, get_edit_SMILES_list, get_edit_prompt_list, evaluate_SMILES_list
-from basic_utils import get_local_time, seed_all, default_dump
+from molecule_edit_utils import load_space_projector, get_edit_SMILES_list, get_edit_prompt, evaluate_SMILES_list
+from basic_utils import get_local_time, seed_all, default_dump, Logger
 
 
 def clip_loss_for_edit(molecule_repr, text_repr):
@@ -40,70 +40,6 @@ def mean_pooling(token_embeddings, attention_mask):
     sum_mask = torch.clamp(input_mask_expanded.sum(0), min=1e-9) # [B, d]
     return sum_embeddings / sum_mask
 
-    
-def check_edit(SMILES, text, l2_lambda_list, gen_model_wrapper, text_branch_model, gen2joint_projector, device):
-    # 首先将输入的SMILES转化为文本-分子联合latent
-    text_list = [text]
-    text2joint_repr = text_branch_model.encode_text_from_pretrain_model(text_list, device)
-
-    # 将输入SMILES在MegaMolBART中的latent作为被解码的latent
-    latent_code_init, pad_mask_init = gen_model_wrapper.smileslist2embedding([SMILES])  # [pad, B, d], [pad, B]
-    regenerated_mol = gen_model_wrapper.inverse_transform([latent_code_init], pad_mask_init.bool().cuda(), k=1, sanitize=True)[0]
-
-    result_SMILES_list_one_pair, result_eval_list_one_pair = [], []
-    
-    if args.use_noise_for_init:
-        print("Use random noise for init")
-        random_noise = torch.randn(latent_code_init.size()).to(device)
-    
-    for l2_lambda in l2_lambda_list:
-        print("l2 lambda: {}".format(l2_lambda))
-        # 记录优化历程中的SMILES，第一个为输入SMILES，第二个为未经过latent optimization直接解码的SMILES
-        current_SMILES_list = [SMILES, regenerated_mol]
-        if args.use_noise_for_init:
-            print("Use random noise for init")
-            latent = latent_code_init.detach().clone() + random_noise
-        else:
-            print("No random noise for init")
-            latent = latent_code_init.detach().clone()
-        pad_mask = pad_mask_init.detach().clone()
-        latent.requires_grad = True
-        optimizer = optim.Adam([latent], lr=args.lr)
-
-        for i in tqdm(range(args.epochs)):
-            t = i / args.epochs
-            # 学习率在前段不变，后段呈现余弦退火
-            lr = get_lr(t, args.lr)
-            optimizer.param_groups[0]["lr"] = lr
-
-            molecule_repr_generation = mean_pooling(latent, pad_mask) # [B, d]
-            if args.normalize:
-                molecule_repr_generation = F.normalize(molecule_repr_generation, dim=-1)
-            gen2joint_repr = gen2joint_projector(molecule_repr_generation)
-
-            clip_loss_ = clip_loss_for_edit(gen2joint_repr, text2joint_repr)
-            l2_loss_ =  l2_lambda * ((latent_code_init - latent) ** 2).mean()
-
-            loss = clip_loss_ + l2_loss_
-
-            optimizer.zero_grad()
-            loss.backward(retain_graph=True)
-            optimizer.step()
-        print("clip loss: {:.5f}\tL2 loss: {:.5f}".format(clip_loss_.item(), l2_loss_.item()))
-
-        generated_mols = gen_model_wrapper.inverse_transform([latent], pad_mask.bool().cuda(), k=1, sanitize=True)
-        current_SMILES_list.append(generated_mols[0])
-        result_SMILES_list_one_pair.append([text] + current_SMILES_list + ['{}'.format(l2_lambda)])
-
-        current_result_list = evaluate_SMILES_list(current_SMILES_list, text)
-        result_eval_list_one_pair.append(current_result_list)
-        print()
-    
-    result_eval_list_one_pair = np.array(result_eval_list_one_pair)
-    result_eval_list_one_pair = np.any(result_eval_list_one_pair, axis=0, keepdims=True)
-    print("result_eval_list_one_pair\n", result_eval_list_one_pair)
-    return result_SMILES_list_one_pair, result_eval_list_one_pair
-
 
 def main(args):
     seed_all(args.seed)
@@ -111,6 +47,7 @@ def main(args):
     print("device:", device)
     if not osp.exists(args.store_dir):
         os.makedirs(args.store_dir)
+    logger = Logger(osp.join(args.store_dir, "log"), time_log=False, log_name=f"{args.edit_task_id}")
 
     # load model
     if args.gen_model == "MegaMolBART":
@@ -133,81 +70,88 @@ def main(args):
     print("\n\n\nstart editing\n\n\n")
 
     edit_SMILES_list = get_edit_SMILES_list(args)
-    prompt_list = get_edit_prompt_list(args)
+    prompt = get_edit_prompt(args)
     result_dict = {}
-    for prompt in prompt_list:
-        result_dict[prompt] = {}
-        print(f"edit task description: {prompt}")
-        success_count = 0
-        for smi in edit_SMILES_list:
-            result_dict[prompt][smi] = {}
-            print(f"edit input: {smi}")
-            text_list = [prompt]
-            text2joint_repr = text_branch_model.encode_text_from_pretrain_model(text_list, device)
+    
+    logger.log(f"edit task id: {args.edit_task_id}")
+    logger.log(f"edit task description: {prompt}")
+    result_dict[prompt] = {}
+    print(f"edit task description: {prompt}")
+    success_count = 0
+    for smi in edit_SMILES_list:
+        result_dict[prompt][smi] = {}
+        print(f"edit input: {smi}")
+        text_list = [prompt]
+        text2joint_repr = text_branch_model.encode_text_from_pretrain_model(text_list, device)
 
-            # 将输入SMILES在MegaMolBART中的latent作为被解码的latent
-            latent_code_init, pad_mask_init = gen_model_wrapper.smileslist2embedding([smi])  # [pad, B, d], [pad, B]
-            regenerated_mol = gen_model_wrapper.inverse_transform([latent_code_init], pad_mask_init.bool().cuda(), k=1, sanitize=True)[0]
-            success_flag = False
-            for l2_lambda in args.l2_lambda_list:
-                print("l2 lambda: {}".format(l2_lambda))
-                # 记录优化历程中的SMILES，第一个为输入SMILES，第二个为未经过latent optimization直接解码的SMILES，后面的为不同l2_lambda下进行学习后解码得到的SMILES
-                current_SMILES_list = [smi, regenerated_mol]
+        # 将输入SMILES在MegaMolBART中的latent作为被解码的latent
+        latent_code_init, pad_mask_init = gen_model_wrapper.smileslist2embedding([smi])  # [pad, B, d], [pad, B]
+        regenerated_mol = gen_model_wrapper.inverse_transform([latent_code_init], pad_mask_init.bool().cuda(), k=1, sanitize=True)[0]
+        success_flag = False
+        for l2_lambda in args.l2_lambda_list:
+            print("l2 lambda: {}".format(l2_lambda))
+            # 记录优化历程中的SMILES，第一个为输入SMILES，第二个为未经过latent optimization直接解码的SMILES，后面的为不同l2_lambda下进行学习后解码得到的SMILES
+            current_SMILES_list = [smi, regenerated_mol]
 
-                latent = latent_code_init.detach().clone()
-                if args.init_noise:
-                    print("Use random noise for init")
-                    random_noise = torch.randn(latent_code_init.size()).to(device)
-                    latent += random_noise
-                latent.requires_grad = True
+            latent = latent_code_init.detach().clone()
+            if args.init_noise:
+                print("Use random noise for init")
+                random_noise = torch.randn(latent_code_init.size()).to(device)
+                latent += random_noise
+            latent.requires_grad = True
 
-                pad_mask = pad_mask_init.detach().clone()
+            pad_mask = pad_mask_init.detach().clone()
 
-                optimizer = optim.Adam([latent], lr=args.lr)
+            optimizer = optim.Adam([latent], lr=args.lr)
 
-                for epoch_id in tqdm(range(args.epoch_num)):
-                    # 学习率在前段不变，后段呈现余弦退火
-                    t = epoch_id / args.epoch_num
-                    lr = get_lr(t, args.lr)
-                    optimizer.param_groups[0]["lr"] = lr
+            for epoch_id in tqdm(range(args.epoch_num)):
+                # 学习率在前段不变，后段呈现余弦退火
+                t = epoch_id / args.epoch_num
+                lr = get_lr(t, args.lr)
+                optimizer.param_groups[0]["lr"] = lr
 
-                    latent2gen_repr = mean_pooling(latent, pad_mask) # [B, d]
-                    if args.normalize:
-                        latent2gen_repr = F.normalize(latent2gen_repr, dim=-1)
-                    gen2joint_repr = gen2joint_projector(latent2gen_repr)
+                latent2gen_repr = mean_pooling(latent, pad_mask) # [B, d]
+                if args.normalize:
+                    latent2gen_repr = F.normalize(latent2gen_repr, dim=-1)
+                gen2joint_repr = gen2joint_projector(latent2gen_repr)
 
-                    clip_loss = clip_loss_for_edit(gen2joint_repr, text2joint_repr)
-                    loss = clip_loss + l2_lambda * nn.MSELoss()(latent_code_init, latent)
-                    # l2_loss_ =  l2_lambda * ((latent_code_init - latent) ** 2).mean()
-                    # loss = clip_loss_ + l2_loss_
+                clip_loss = clip_loss_for_edit(gen2joint_repr, text2joint_repr)
+                loss = clip_loss + l2_lambda * nn.MSELoss()(latent_code_init, latent)
+                # l2_loss_ =  l2_lambda * ((latent_code_init - latent) ** 2).mean()
+                # loss = clip_loss_ + l2_loss_
 
-                    optimizer.zero_grad()
-                    loss.backward(retain_graph=True)
-                    optimizer.step()
+                optimizer.zero_grad()
+                loss.backward(retain_graph=True)
+                optimizer.step()
 
-                print(F"final MSELoss: {loss.item()}")
+            print(F"final MSELoss: {loss.item()}")
 
-                generated_mols = gen_model_wrapper.inverse_transform([latent], pad_mask.bool().cuda(), k=1, sanitize=True)
-                current_SMILES_list.append(generated_mols[0])
-                # evaluate_SMILES_list输入一个SMILES列表，返回一个bool列表，表示每个SMILES是否符合prompt的要求，输出是[True]或[False]
-                current_result_list = evaluate_SMILES_list(current_SMILES_list, prompt)
-                if current_result_list[0]:
-                    success_flag = True
-                result_dict[prompt][smi][l2_lambda] = {
-                    "output": current_SMILES_list[2],
-                    "result": current_result_list[0]
-                }
-            if success_flag:
-                success_count += 1
-        result_dict[prompt]["success_count"] = success_count
-        result_dict[prompt]["success_rate"] = success_count / len(edit_SMILES_list)
+            generated_mols = gen_model_wrapper.inverse_transform([latent], pad_mask.bool().cuda(), k=1, sanitize=True)
+            current_SMILES_list.append(generated_mols[0])
+            # evaluate_SMILES_list输入一个SMILES列表，返回一个bool列表，表示每个SMILES是否符合prompt的要求，输出是[True]或[False]
+            current_result_list = evaluate_SMILES_list(current_SMILES_list, prompt)
+            if current_result_list[0]:
+                success_flag = True
+            logger.log(f"input: {smi}, l2_lambda: {l2_lambda}, output: {current_SMILES_list[2]}, result: {current_result_list[0]}")
+            result_dict[prompt][smi][l2_lambda] = {
+                "output": current_SMILES_list[2],
+                "result": current_result_list[0]
+            }
+            result_dict[prompt][smi][l2_lambda] = {
+                "output": current_SMILES_list[2],
+                "result": current_result_list[0]
+            }
+        if success_flag:
+            success_count += 1
+    result_dict[prompt]["success_count"] = success_count
+    result_dict[prompt]["success_rate"] = success_count / len(edit_SMILES_list)
 
-        if args.store_dir is not None:
-            save_filename = f"{args.edit_task_id}_result.json"
-            json_str = json.dumps(result_dict, ensure_ascii=False, default=default_dump)
-            with open(os.path.join(args.store_dir, save_filename), 'w', encoding='utf-8') as file:
-                file.write(json_str)
-            file.close()
+    if args.store_dir is not None:
+        save_filename = f"{args.edit_task_id}_result.json"
+        json_str = json.dumps(result_dict, ensure_ascii=False, default=default_dump)
+        with open(os.path.join(args.store_dir, save_filename), 'w', encoding='utf-8') as file:
+            file.write(json_str)
+        file.close()
 
 
 if __name__ == "__main__":

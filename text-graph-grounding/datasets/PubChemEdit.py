@@ -66,7 +66,7 @@ class PubChemEdit(InMemoryDataset):
                 if self.mode == "full":
                     raw_descriptions = [desc for label, desc in item["Description"].items() if desc != "" and label not in ["Pharmacology/Biochemistry", "Others"]]
                 elif self.mode == "main":
-                    raw_descriptions = [desc for label, desc in item["Description"].items() if desc != "" and label in ["MolecularStructure/Classification", "FunctionalGroups", "PhysicalProperty/ChemicalProperty", "BiologicalProperty/PharmacologicalEffect"]]
+                    raw_descriptions = [desc for label, desc in item["Description"].items() if desc != "" and label in ["MolecularStructure/Classification", "FunctionalGroups", "PhysicalProperty/ChemicalProperty", "CalculatedProperties", "BiologicalProperty/PharmacologicalEffect"]]
                 else:
                     raise ValueError(f"Invalid mode: {self.mode}")
                 self.description_list.append(" ".join(raw_descriptions))

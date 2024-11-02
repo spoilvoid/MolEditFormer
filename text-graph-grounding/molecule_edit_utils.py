@@ -26,6 +26,7 @@ DESCRIPTION_DICT = {
     106: "This molecule has low permeability.",
     107: "This molecule has more hydrogen bond acceptors.",
     108: "This molecule has more hydrogen bond donors.",
+
     109: "This molecule has high bioavailability.",
     110: "This molecule has low toxicity.",
     111: "This molecule is metabolically stable.",
@@ -51,6 +52,17 @@ DESCRIPTION_DICT = {
     404: "This molecule is tested positive in an assay for activators involved in the transport of proteins between the endosomes and the trans Golgi network.",
     405: "This molecule is an inhibitor of a protein that prevents the establishment of the cellular antiviral state by inhibiting ubiquitination that triggers antiviral transduction signal and inhibits post-transcriptional processing of cellular pre-mRNA.",
     406: "This molecule is tested positive in the high throughput screening assay to identify inhibitors of the SARS coronavirus 3C-like Protease, which cleaves the C-terminus of replicase polyprotein at 11 sites.",
+
+    501: "This molecule is more soluble in water than in oil.",
+    502: "This molecule is less soluble in water than in oil.",
+    503: "This molecule has higher logP.",
+    504: "This molecule has lower logP.",
+    505: "This molecule has lower TPSA.",
+    506: "This molecule has higher TPSA.",
+    507: "This molecule has less hydrogen bond acceptors.",
+    508: "This molecule has less hydrogen bond donors.",
+    509: "This molecule has high molecular weight.",
+    510: "This molecule has low molecular weight.",
 }
 
 
@@ -98,18 +110,16 @@ def get_edit_SMILES_list(args):
     return SMILES_list
 
 
-def get_edit_prompt_list(args):
-    description_list = []
+def get_edit_prompt(args):
     if args.test:
         if args.edit_prompt is not None:
-            description_list.append(args.input_description)
+            return args.input_description
     else:
         if args.edit_task_id not in DESCRIPTION_DICT.keys():
             raise ValueError
         else:
             print("Use {} descrition.".format(args.edit_task_id))
-            description_list.append(DESCRIPTION_DICT[args.edit_task_id])
-    return description_list
+            return DESCRIPTION_DICT[args.edit_task_id]
 
 
 # def load_CLIP_molecule_branch(args):
@@ -204,7 +214,7 @@ def evaluate_SMILES_list(SMILES_list, description):
     if len(mol_list) < 3:
         return [False]
 
-    if "soluble" in description and "insoluble" not in description:
+    if ("soluble" in description and "insoluble" not in description) or "more soluble in water than in oil" in description or "higher logP" in description:
         props = ["MolLogP"]
         prop_pred = [(n, func) for n, func in Descriptors.descList if n.split("_")[-1] in props]
         value_list = []
@@ -218,7 +228,7 @@ def evaluate_SMILES_list(SMILES_list, description):
         else:
             answer = [False]
 
-    elif "insoluble" in description:
+    elif "insoluble" in description or "less soluble in water than in oil" in description  or "lower logP" in description:
         props = ["MolLogP"]
         prop_pred = [(n, func) for n, func in Descriptors.descList if n.split("_")[-1] in props]
         value_list = []
@@ -260,7 +270,7 @@ def evaluate_SMILES_list(SMILES_list, description):
         else:
             answer = [False]
 
-    elif description in ["This molecule has higher permeability.", "This molecule has high permeability."]:
+    elif description in ["This molecule has higher permeability.", "This molecule has high permeability.", "This molecule has lower TPSA."]:
         props = ["TPSA"]
         prop_pred = [(n, func) for n, func in Descriptors.descList if n.split("_")[-1] in props]
         value_list = []
@@ -274,7 +284,7 @@ def evaluate_SMILES_list(SMILES_list, description):
         else:
             answer = [False]
 
-    elif description in ["This molecule has lower permeability.", "This molecule has low permeability."]:
+    elif description in ["This molecule has lower permeability.", "This molecule has low permeability.", "This molecule has higher TPSA."]:
         props = ["TPSA"]
         prop_pred = [(n, func) for n, func in Descriptors.descList if n.split("_")[-1] in props]
         value_list = []
@@ -329,6 +339,20 @@ def evaluate_SMILES_list(SMILES_list, description):
             answer = [True]
         else:
             answer = [False]
+    
+    elif description in ["This molecule has less hydrogen bond acceptors."]:
+        props = ["NumHAcceptors"]
+        prop_pred = [(n, func) for n, func in Descriptors.descList if n.split("_")[-1] in props]
+        value_list = []
+        for name, func in prop_pred:
+            for SMILES, mol in zip(SMILES_list, mol_list):
+                value = func(mol)
+                value_list.append(value)
+                print("{} & {:.5f}".format(SMILES, value))
+        if value_list[0] > value_list[2]:
+            answer = [True]
+        else:
+            answer = [False]
 
     elif description in ["This molecule has more hydrogen bond donors."]:
         props = ["NumHDonors"]
@@ -340,6 +364,20 @@ def evaluate_SMILES_list(SMILES_list, description):
                 value_list.append(value)
                 print("{} & {:.5f}".format(SMILES, value))
         if value_list[0] < value_list[2]:
+            answer = [True]
+        else:
+            answer = [False]
+    
+    elif description in ["This molecule has less hydrogen bond donors."]:
+        props = ["NumHDonors"]
+        prop_pred = [(n, func) for n, func in Descriptors.descList if n.split("_")[-1] in props]
+        value_list = []
+        for name, func in prop_pred:
+            for SMILES, mol in zip(SMILES_list, mol_list):
+                value = func(mol)
+                value_list.append(value)
+                print("{} & {:.5f}".format(SMILES, value))
+        if value_list[0] > value_list[2]:
             answer = [True]
         else:
             answer = [False]

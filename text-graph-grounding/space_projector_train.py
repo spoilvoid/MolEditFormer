@@ -119,7 +119,7 @@ def main(args):
     seed_all(args.seed)
     device = torch.device("cuda:{}".format(args.gpu) if torch.cuda.is_available() else "cpu")
     print("device:", device)
-    model_save_dir = osp.join(args.store_dir, f"{args.molecule_type}_{args.gnn_type}_lr{args.gen2joint_lr}-{get_local_time()}")
+    model_save_dir = osp.join(args.store_dir, f"lr{args.gen2joint_lr}")
     logger = Logger(osp.join(model_save_dir, "log"), args.time_log)
     writer = SummaryWriter(osp.join(model_save_dir, "tensorboard"))
     # load model
