@@ -4,6 +4,9 @@ import json
 import pandas as pd
 from itertools import repeat
 from tqdm import tqdm
+from functools import partial
+import multiprocessing as mp
+from multiprocessing import Pool
 
 import rdkit
 from rdkit import Chem
@@ -18,9 +21,11 @@ from . import dataset_utils
 class MolPair_SingleGraph(InMemoryDataset):
     def __init__(self, root, subset_size=None, transform=None, pre_transform=None, pre_filter=None):
         self.root = root
-        self.raw_SMILES_filepath = os.path.join(self.root, "physical_prop/allset/raw_data.csv")
-        df = pd.read_csv(self.raw_SMILES_filepath)
-        self.SMILES_list = df['smiles'].tolist()
+        self.raw_filepath = os.path.join(self.root, "raw/smiles_descriptions.json")
+        with open(self.raw_filepath, 'r') as f:
+            description_dict = json.load(f)
+        self.SMILES_list = list(description_dict.keys())
+        self.description_list = list(description_dict.values())
         
         super(MolPair_SingleGraph, self).__init__(root, transform, pre_transform, pre_filter)
 
@@ -38,12 +43,20 @@ class MolPair_SingleGraph(InMemoryDataset):
     def processed_file_names(self):
         return 'graph.pt'
 
+    def get_graph(self, smi):
+        mol = Chem.MolFromSmiles(smi)
+        graph = dataset_utils.mol_to_graph_data_obj_simple(mol)
+        return graph
+        
     def process(self):
         graph_list = []
         for SMILES in tqdm(self.SMILES_list):
             RDKit_mol = Chem.MolFromSmiles(SMILES)
             graph = dataset_utils.mol_to_graph_data_obj_simple(RDKit_mol)
             graph_list.append(graph)
+        # with mp.Pool(int(mp.cpu_count()/2)) as pool:
+        #     graph_list = list(tqdm(pool.imap(self.get_graph, self.SMILES_list), total=len(self.SMILES_list)))
+
 
         if self.pre_filter is not None:
             graph_list = [graph for graph in graph_list if self.pre_filter(graph)]
@@ -57,6 +70,7 @@ class MolPair_SingleGraph(InMemoryDataset):
 
     def get(self, idx):
         SMILES = self.SMILES_list[idx]
+        description = self.description_list[idx]
 
         data = Data()
         for key in self.graphs.keys:
@@ -64,7 +78,7 @@ class MolPair_SingleGraph(InMemoryDataset):
             s = list(repeat(slice(None), item.dim()))
             s[data.__cat_dim__(key, item)] = slice(slices[idx], slices[idx + 1])
             data[key] = item[s]
-        return SMILES, data
+        return SMILES, description, data
 
     def __len__(self):
         return len(self.SMILES_list)

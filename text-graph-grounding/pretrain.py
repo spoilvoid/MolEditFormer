@@ -19,7 +19,7 @@ from torch_geometric.loader import DataLoader as pyg_DataLoader
 from transformers import AutoModel, AutoTokenizer
 
 from models import CLIP, tokenize
-from datasets import PubChemEdit, DataHelper, MolGraphDataset
+from datasets import PubChemEdit, MolPair_SingleGraph , DataHelper, MolGraphDataset
 
 from basic_utils import get_local_time, freeze_network, seed_all, Logger
 
@@ -102,7 +102,7 @@ def main(args):
     seed_all(args.seed)
     device = torch.device("cuda:{}".format(args.gpu) if torch.cuda.is_available() else "cpu")
     print("device:", device)
-    model_save_dir = osp.join(args.store_dir, f"{args.molecule_type}_{args.gnn_type}-{get_local_time()}")
+    model_save_dir = osp.join(args.store_dir, f"{args.data_source}_{args.molecule_type}_{args.gnn_type}-{get_local_time()}")
     if not osp.exists(model_save_dir):
         os.makedirs(model_save_dir)
     logger = Logger(osp.join(model_save_dir, "log"), args.time_log)
@@ -114,7 +114,10 @@ def main(args):
     # in_g = Data(x=node_f, edge_index=edge_index).to(device)
     # dataset = MolGraphDataset(args.graph_root)
 
-    train_set = PubChemEdit(args.data_dir, mode=args.mode, can_smiles=args.can_smiles)
+    if args.data_source == "PubChemEdit":
+        train_set = PubChemEdit(args.data_dir, mode=args.mode, can_smiles=args.can_smiles)
+    elif args.data_source == "MolPair":
+        train_set = MolPair_SingleGraph(args.data_dir)
     train_loader = pyg_DataLoader(train_set, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
     if args.repr_frozen:
         freeze_network(model.text_model)
@@ -212,6 +215,7 @@ if __name__ == "__main__":
     parser.add_argument("--time_log", type=bool, default=True)
     parser.add_argument("--log_freq", type=int, default=1000)
     # dataset config
+    parser.add_argument("--data_source", type=str, default="PubChemEdit", choices=["PubChemEdit", "MolPair"])
     parser.add_argument("--data_dir", type=str, default="data/PubChemEdit/version_0")
     parser.add_argument("--mode", type=str, default="full", choices=["full", "main", "expand"])
     parser.add_argument("--can_smiles", action="store_true")

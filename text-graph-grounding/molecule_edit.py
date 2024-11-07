@@ -18,6 +18,8 @@ from molecule_edit_utils import load_space_projector, get_edit_SMILES_list, get_
 from basic_utils import get_local_time, seed_all, default_dump, Logger
 
 
+# molecule_repr: [batch_size, d_model_joint], text_repr: [batch_size, d_model_joint]
+# 这里batch_size为1，没有问题，否则可能产生问题，需要修改
 def clip_loss_for_edit(molecule_repr, text_repr):
     molecule_repr = F.normalize(molecule_repr, dim=-1)
     text_repr = F.normalize(text_repr, dim=-1)
@@ -33,8 +35,12 @@ def get_lr(t, initial_lr, rampdown=0.25, rampup=0.05):
     return initial_lr * lr_ramp
 
 
+# 这里为什么要mask反转，这样所有有效token不是mask被置为0了吗
+# 结论，因为其mask表示的是0为有效，1为无效
+# token_embeddings: [pad_len, batch_size, d_model_gen], attention_mask: [pad_len, batch_size]
 def mean_pooling(token_embeddings, attention_mask):
     attention_mask = ~attention_mask
+    # input_mask_expanded: [batch_size, pad_len, d_model_gen]
     input_mask_expanded = attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float() # [pad, B, d]
     sum_embeddings = torch.sum(token_embeddings * input_mask_expanded, 0) # [B, d]
     sum_mask = torch.clamp(input_mask_expanded.sum(0), min=1e-9) # [B, d]
@@ -85,7 +91,10 @@ def main(args):
         text2joint_repr = text_branch_model.encode_text_from_pretrain_model(text_list, device)
 
         # 将输入SMILES在MegaMolBART中的latent作为被解码的latent
-        latent_code_init, pad_mask_init = gen_model_wrapper.smileslist2embedding([smi])  # [pad, B, d], [pad, B]
+        # latent_code_init: [pad_len, batch_size, d_model_gen], pad_mask_init: [pad_len, batch_size]
+        latent_code_init, pad_mask_init = gen_model_wrapper.smileslist2embedding([smi])  # [pad, B, d], 
+        print(pad_mask_init)
+        
         regenerated_mol = gen_model_wrapper.inverse_transform([latent_code_init], pad_mask_init.bool().cuda(), k=1, sanitize=True)[0]
         success_flag = False
         for l2_lambda in args.l2_lambda_list:
