@@ -1,6 +1,7 @@
 import os
 import os.path as osp
 import sys
+import math
 import time
 import argparse
 import numpy as np
@@ -8,9 +9,10 @@ from tqdm import tqdm
 from sklearn import preprocessing
 
 import torch
-import torch.optim as optim
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.optim as optim
+from torch.optim.lr_scheduler import _LRScheduler
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
@@ -22,6 +24,44 @@ from models import CLIP, tokenize
 from datasets import PubChemEdit, MolPair_SingleGraph , DataHelper, MolGraphDataset
 
 from basic_utils import get_local_time, freeze_network, seed_all, Logger
+
+
+class epoch_based_WarmupCosineLR(_LRScheduler):
+    def __init__(self, optimizer, warmup_epochs, total_epochs, last_epoch=-1):
+        self.warmup_epochs = warmup_epochs
+        self.total_epochs = total_epochs
+        super(epoch_based_WarmupCosineLR, self).__init__(optimizer, last_epoch)
+
+    def get_lr(self):
+        if self.last_epoch < self.warmup_epochs:
+            # 线性增加学习率
+            return [base_lr * (self.last_epoch + 1) / self.warmup_epochs for base_lr in self.base_lrs]
+        else:
+            # 余弦退火学习率
+            return [
+                base_lr * 0.5 * (1 + math.cos(
+                    math.pi * (self.last_epoch - self.warmup_epochs) / (self.total_epochs - self.warmup_epochs)
+                )) for base_lr in self.base_lrs
+            ]
+        
+
+class batch_based_WarmupCosineLR_step(_LRScheduler):
+    def __init__(self, optimizer, warmup_steps, total_steps, last_epoch=-1):
+        self.warmup_steps = warmup_steps
+        self.total_steps = total_steps
+        super(batch_based_WarmupCosineLR_step, self).__init__(optimizer, last_epoch)
+
+    def get_lr(self):
+        current_step = self.last_epoch + 1
+
+        if current_step <= self.warmup_steps:
+            # 线性增加学习率
+            return [base_lr * current_step / self.warmup_steps for base_lr in self.base_lrs]
+        else:
+            # 余弦退火学习率
+            progress = (current_step - self.warmup_steps) / (self.total_steps - self.warmup_steps)
+            cosine_decay = 0.5 * (1 + math.cos(math.pi * progress))
+            return [base_lr * cosine_decay for base_lr in self.base_lrs]
 
 
 def cycle_index(num, shift):
@@ -102,7 +142,13 @@ def main(args):
     seed_all(args.seed)
     device = torch.device("cuda:{}".format(args.gpu) if torch.cuda.is_available() else "cpu")
     print("device:", device)
-    model_save_dir = osp.join(args.store_dir, f"{args.data_source}_{args.molecule_type}_{args.gnn_type}-{get_local_time()}")
+    if args.dir_name == "":
+        if args.warmup_choice == "epoch":
+            model_save_dir = osp.join(args.store_dir, f"{args.data_source}_{args.molecule_type}_{args.gnn_type}_warmup_{args.warmup_choice}{args.warmup_epoch}")
+        else:
+            model_save_dir = osp.join(args.store_dir, f"{args.data_source}_{args.molecule_type}_{args.gnn_type}_warmup_{args.warmup_choice}{args.warmup_batch}")
+    else:
+        model_save_dir = osp.join(args.store_dir, args.dir_name)
     if not osp.exists(model_save_dir):
         os.makedirs(model_save_dir)
     logger = Logger(osp.join(model_save_dir, "log"), args.time_log)
@@ -146,7 +192,14 @@ def main(args):
             "mol2latent": True,
         }
     optimizer = optim.Adam(model_param_group, weight_decay=args.weight_decay)
-
+    if args.warmup_choice == "no":
+        pass
+    elif args.warmup_choice == "epoch":
+        scheduler = epoch_based_WarmupCosineLR(optimizer, warmup_epochs=args.warmup_epoch, total_epochs=args.epoch_num)
+    elif args.warmup_choice == "batch":
+        scheduler = batch_based_WarmupCosineLR_step(optimizer, warmup_steps=args.warmup_batch, total_steps=args.epoch_num * len(train_loader))
+    else:
+        raise ValueError("Invalid warmup choice")
 
     optimal_loss = args.loss_threshold
     for epoch_id in range(args.start_epoch, args.epoch_num):
@@ -191,15 +244,20 @@ def main(args):
             torch.cuda.empty_cache()
             all_loss.backward()
             optimizer.step()
+            if args.warmup_choice == "batch":
+                scheduler.step()
 
             # information record and save model
             loss = round((all_loss.detach().clone()).cpu().item(), 4)
-            if (epoch_id * len(train_loader) + i_batch) % args.log_freq == 0:
-                logger.log("{} epoch {}th batch loss in :{}".format(epoch_id + 1, i_batch, loss))
-                writer.add_scalar("Train_Loss/batch", loss, epoch_id * len(train_loader) + i_batch)
-            # if (epoch_id * len(train_loader) + i_batch) % args.save_freq == 0:
-            #     model.save_model(model_save_dir, f"epoch{epoch_id}_batch{i_batch}", save_config)
+            if (epoch_id * len(train_loader) + i_batch + 1) % args.log_freq == 0:
+                logger.log("{} epoch {}th batch loss in :{}".format(epoch_id + 1, i_batch + 1, loss))
+                writer.add_scalar("Train_Loss/batch", loss, epoch_id * len(train_loader) + i_batch + 1)
+                if loss < optimal_loss:
+                    model.save_model(model_save_dir, f"epoch{epoch_id}_batch{i_batch+1}", save_config)
             epoch_loss += loss / len(train_loader)
+        
+        if args.warmup_choice == "epoch":
+            scheduler.step()
 
         logger.log("{}th epoch mean loss:{}".format(epoch_id + 1, epoch_loss))
         writer.add_scalar("Train_Loss/epoch", epoch_loss, epoch_id + 1)
@@ -226,6 +284,9 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--gpu", type=int, default=1)
     parser.add_argument("--start_epoch", type=int, default=0)
+    parser.add_argument("--warmup_choice", type=str, default="no", choices=["no", "epoch", "batch"])
+    parser.add_argument("--warmup_epoch", type=int, default=10, help="epoch start to warmup")
+    parser.add_argument("--warmup_batch", type=int, default=5000, help="batch start to warmup")
     parser.add_argument("--epoch_num", type=int, default=32, help="epoch number")
     parser.add_argument("--text_lr", type=float, default=1e-4)
     parser.add_argument("--graph_lr", type=float, default=1e-5)
@@ -268,6 +329,7 @@ if __name__ == "__main__":
     parser.add_argument('--mol_projector_path', type=str, default='ckpt/mol_align/mol_projector.pth')
     # save config
     parser.add_argument("--store_dir", type=str, default="ckpt/MolAlign/pretrain")
+    parser.add_argument("--dir_name", type=str, default="")
     parser.add_argument("--save_freq", type=int, default=4000)
     parser.add_argument("--loss_threshold", type=float, default=sys.maxsize)
     # contrastive SSL config

@@ -63,6 +63,23 @@ DESCRIPTION_DICT = {
     508: "This molecule has less hydrogen bond donors.",
     509: "This molecule has high molecular weight.",
     510: "This molecule has low molecular weight.",
+
+    601: "This molecule has lower logP.",
+    602: "This molecule has higher logP.",
+    603: "This molecule has higher QED.",
+    604: "This molecule has lower QED.",
+    605: "This molecule has lower TPSA.",
+    606: "This molecule has higher TPSA.",
+    607: "This molecule has more HBA.",
+    608: "This molecule has more HBD.",
+
+    601: "This molecule has lower logP and more HBA.",
+    602: "This molecule has higher logP and more HBA.",
+    603: "This molecule has lower logP and more HBD.",
+    604: "This molecule has higher logP and more HBD.",
+    605: "This molecule has lower logP and lower TPSA.",
+    606: "This molecule has lower logP and higher TPSA.",
+
 }
 
 
@@ -499,3 +516,105 @@ def evaluate_SMILES_list(SMILES_list, description):
         answer = [False]
 
     return answer
+
+
+
+def evaluate_SMILES_success_rate(input_smi, output_smi, task_id):
+    '''
+    input_smi: str # input SMILES
+    output_smi: str # output SMILES
+    task_id: int # pre-defined task id in DESCRIPTION_DICT above
+    '''
+    # check smiles validation
+    input_mol = Chem.MolFromSmiles(input_smi)
+    output_mol = Chem.MolFromSmiles(output_smi)
+    if input_mol is None and output_mol is None:
+        return False
+        # return False, "both invalid SMILES"
+    elif input_mol is None and output_mol is not None:
+        return False
+        # return False, "invalid input SMILES"
+    elif input_mol is not None and output_mol is None:
+        return False
+        # return False, "invalid output SMILES"
+
+    success_flag = True
+    # record = []
+    # logP evaluation
+    if task_id in [101, 102, 201, 202, 203, 204, 205, 206, 501, 502, 503, 504, 601]:
+        input_prop = Descriptors.MolLogP(input_mol)
+        output_prop = Descriptors.MolLogP(output_mol)
+        if task_id in [101, 201, 203, 205, 206, 501, 504]:
+            if input_prop <= output_prop:
+                success_flag = False
+                # record.append(f"logP input:{input_prop} <= output:{output_prop} failed")
+        elif task_id in [102, 202, 204, 502, 503]:
+            if input_prop >= output_prop:
+                success_flag = False
+                # record.append(f"logP input:{input_prop} >= output:{output_prop} failed")
+    # QED evaluation
+    if task_id in [103, 104]:
+        input_prop = Descriptors.qed(input_mol)
+        output_prop = Descriptors.qed(output_mol)
+        if task_id in [103]:
+            if input_prop >= output_prop:
+                success_flag = False
+                # record.append(f"QED input:{input_prop} >= output:{output_prop} failed")
+        elif task_id in [104]:
+            if input_prop <= output_prop:
+                success_flag = False
+                # record.append(f"QED input:{input_prop} <= output:{output_prop} failed")
+    # TPSA evaluation
+    if task_id in [105, 106, 205, 206, 505, 506]:
+        input_prop = Descriptors.TPSA(input_mol)
+        output_prop = Descriptors.TPSA(output_mol)
+        if task_id in [105, 205, 506]:
+            if input_prop <= output_prop:
+                success_flag = False
+                # record.append(f"TPSA input:{input_prop} <= output:{output_prop} failed")
+        elif task_id in [106, 206, 505]:
+            if input_prop >= output_prop:
+                success_flag = False
+                # record.append(f"TPSA input:{input_prop} >= output:{output_prop} failed")
+    # HBA evaluation
+    if task_id in [107, 201, 202, 507]:
+        input_prop = Descriptors.NumHAcceptors(input_mol)
+        output_prop = Descriptors.NumHAcceptors(output_mol)
+        if task_id in [107, 201, 202]:
+            if input_prop >= output_prop:
+                success_flag = False
+                # record.append(f"hydrogen bond acceptors input:{input_prop} >= output:{output_prop} failed")
+        elif task_id in [507]:
+            if input_prop <= output_prop:
+                success_flag = False
+                # record.append(f"hydrogen bond acceptors input:{input_prop} <= output:{output_prop} failed")
+    # HBD evaluation
+    if task_id in [108, 203, 204, 508]:
+        input_prop = Descriptors.NumHDonors(input_mol)
+        output_prop = Descriptors.NumHDonors(output_mol)
+        if task_id in [108, 203, 204]:
+            if input_prop >= output_prop:
+                success_flag = False
+                # record.append(f"hydrogen bond donors input:{input_prop} >= output:{output_prop} failed")
+        elif task_id in [508]:
+            if input_prop <= output_prop:
+                success_flag = False
+                # record.append(f"hydrogen bond donors input:{input_prop} <= output:{output_prop} failed")
+    # Molecular Weight evaluation
+    if task_id in [509, 510]:
+        input_prop = Descriptors.MolWt(input_mol)
+        output_prop = Descriptors.MolWt(output_mol)
+        if task_id in [509]:
+            if input_prop >= output_prop:
+                success_flag = False
+                # record.append(f"Molecular Weight input:{input_prop} >= output:{output_prop} failed")
+        elif task_id in [510]:
+            if input_prop <= output_prop:
+                success_flag = False
+                # record.append(f"Molecular Weight input:{input_prop} <= output:{output_prop} failed")
+    if success_flag:
+        return success_flag
+        # return success_flag, "success"
+    else:
+        return success_flag
+        # return success_flag, " and ".join(record)

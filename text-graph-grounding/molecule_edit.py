@@ -14,12 +14,12 @@ from torch import optim
 import torch.nn.functional as F
 
 from models import CLIP, MegaMolBART, MLP
-from molecule_edit_utils import load_space_projector, get_edit_SMILES_list, get_edit_prompt, evaluate_SMILES_list
-from basic_utils import get_local_time, seed_all, default_dump, Logger
+from molecule_edit_utils import load_space_projector, get_edit_SMILES_list, get_edit_prompt, evaluate_SMILES_list, evaluate_SMILES_success_rate
+from basic_utils import get_local_time, seed_all, default_dump
 
 
 # molecule_repr: [batch_size, d_model_joint], text_repr: [batch_size, d_model_joint]
-# 这里batch_size为1，没有问题，否则可能产生问题，需要修改
+# 本质上是cosine similarity
 def clip_loss_for_edit(molecule_repr, text_repr):
     molecule_repr = F.normalize(molecule_repr, dim=-1)
     text_repr = F.normalize(text_repr, dim=-1)
@@ -53,7 +53,6 @@ def main(args):
     print("device:", device)
     if not osp.exists(args.store_dir):
         os.makedirs(args.store_dir)
-    logger = Logger(osp.join(args.store_dir, "log"), time_log=False, log_name=f"{args.edit_task_id}")
 
     # load model
     if args.gen_model == "MegaMolBART":
@@ -79,8 +78,6 @@ def main(args):
     prompt = get_edit_prompt(args)
     result_dict = {}
     
-    logger.log(f"edit task id: {args.edit_task_id}")
-    logger.log(f"edit task description: {prompt}")
     result_dict[prompt] = {}
     print(f"edit task description: {prompt}")
     success_count = 0
@@ -93,7 +90,7 @@ def main(args):
         # 将输入SMILES在MegaMolBART中的latent作为被解码的latent
         # latent_code_init: [pad_len, batch_size, d_model_gen], pad_mask_init: [pad_len, batch_size]
         latent_code_init, pad_mask_init = gen_model_wrapper.smileslist2embedding([smi])  # [pad, B, d], 
-        print(pad_mask_init)
+        # print(pad_mask_init)
         
         regenerated_mol = gen_model_wrapper.inverse_transform([latent_code_init], pad_mask_init.bool().cuda(), k=1, sanitize=True)[0]
         success_flag = False
@@ -113,6 +110,7 @@ def main(args):
 
             optimizer = optim.Adam([latent], lr=args.lr)
 
+            last_loss = 1e9
             for epoch_id in tqdm(range(args.epoch_num)):
                 # 学习率在前段不变，后段呈现余弦退火
                 t = epoch_id / args.epoch_num
@@ -126,22 +124,30 @@ def main(args):
 
                 clip_loss = clip_loss_for_edit(gen2joint_repr, text2joint_repr)
                 loss = clip_loss + l2_lambda * nn.MSELoss()(latent_code_init, latent)
+                # print(F"epoch: {epoch_id}, loss: {loss.item()}")
+
+                if args.epoch_num / 2 < epoch_id and last_loss < loss.item():
+                    break
+                
                 # l2_loss_ =  l2_lambda * ((latent_code_init - latent) ** 2).mean()
                 # loss = clip_loss_ + l2_loss_
 
                 optimizer.zero_grad()
                 loss.backward(retain_graph=True)
                 optimizer.step()
+                last_loss = loss.item()
 
             print(F"final MSELoss: {loss.item()}")
 
             generated_mols = gen_model_wrapper.inverse_transform([latent], pad_mask.bool().cuda(), k=1, sanitize=True)
             current_SMILES_list.append(generated_mols[0])
             # evaluate_SMILES_list输入一个SMILES列表，返回一个bool列表，表示每个SMILES是否符合prompt的要求，输出是[True]或[False]
-            current_result_list = evaluate_SMILES_list(current_SMILES_list, prompt)
+            # current_result_list = evaluate_SMILES_list(current_SMILES_list, prompt)
+            current_result = evaluate_SMILES_success_rate(current_SMILES_list[0], current_SMILES_list[2], args.edit_task_id)
+            current_result_list = [current_result]
             if current_result_list[0]:
                 success_flag = True
-            logger.log(f"input: {smi}, l2_lambda: {l2_lambda}, output: {current_SMILES_list[2]}, result: {current_result_list[0]}")
+            print(success_flag)
             result_dict[prompt][smi][l2_lambda] = {
                 "output": current_SMILES_list[2],
                 "result": current_result_list[0]
@@ -157,10 +163,8 @@ def main(args):
 
     if args.store_dir is not None:
         save_filename = f"{args.edit_task_id}_result.json"
-        json_str = json.dumps(result_dict, ensure_ascii=False, default=default_dump)
         with open(os.path.join(args.store_dir, save_filename), 'w', encoding='utf-8') as file:
-            file.write(json_str)
-        file.close()
+            json.dump(result_dict, file, indent=4, ensure_ascii=False, default=default_dump)
 
 
 if __name__ == "__main__":
