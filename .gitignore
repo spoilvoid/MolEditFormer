@@ -1,5 +1,8 @@
 **/__pycache__/
 **/test.ipynb
 **/test.py
-text-graph-grounding/ckpt/
-text-graph-grounding/data/
+ckpt/
+data/
+conda_env.md
+Dockerfile
+env_build.sh

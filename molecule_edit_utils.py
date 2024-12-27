@@ -524,6 +524,8 @@ def evaluate_SMILES_success_rate(input_smi, output_smi, task_id):
     input_smi: str # input SMILES
     output_smi: str # output SMILES
     task_id: int # pre-defined task id in DESCRIPTION_DICT above
+
+    output: bool # success or not
     '''
     # check smiles validation
     input_mol = Chem.MolFromSmiles(input_smi)
@@ -612,9 +614,8 @@ def evaluate_SMILES_success_rate(input_smi, output_smi, task_id):
             if input_prop <= output_prop:
                 success_flag = False
                 # record.append(f"Molecular Weight input:{input_prop} <= output:{output_prop} failed")
-    if success_flag:
-        return success_flag
+    return success_flag
+    # if success_flag:
         # return success_flag, "success"
-    else:
-        return success_flag
+    # else:
         # return success_flag, " and ".join(record)
