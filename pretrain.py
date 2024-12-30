@@ -96,10 +96,13 @@ def cl_loss(s_features, t_features, args):
     if args.SSL_loss == 'EBM_NCE':
         criterion = nn.BCEWithLogitsLoss()
         # use cycle_index to form k negative samples
+        # neg_X [args.CL_neg_samples * batch_size, SSL_emb_dim]: negative molecular features
+        # neg_Y [args.CL_neg_samples * batch_size, SSL_emb_dim]: negative description text features 
         neg_Y = torch.cat([Y[cycle_index(len(Y), i + 1)] for i in range(args.CL_neg_samples)], dim=0)
         neg_X = X.repeat((args.CL_neg_samples, 1))
 
         # calculate the cosine similarity for each sample
+        # 这里由于组播的原理这里是逐项相乘，这里sum后得到对应分子-文本对的余弦相似度，再除以温度参数
         pred_pos = torch.sum(X * Y, dim=1) / args.T
         pred_neg = torch.sum(neg_X * neg_Y, dim=1) / args.T
 

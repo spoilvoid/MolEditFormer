@@ -4,5 +4,4 @@
 ckpt/
 data/
 conda_env.md
-Dockerfile
 env_build.sh
