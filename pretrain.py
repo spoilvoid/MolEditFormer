@@ -117,11 +117,14 @@ def cl_loss(s_features, t_features, args):
         CL_acc = CL_acc.detach().cpu().item()
 
     elif args.SSL_loss == 'InfoNCE':
+        # 在InfoNCE中，假设每个样本都有一个唯一的标签
+        # 认为文本特征向量与分子特征向量的点积如果来自于同一化学分子，那么结果应为1，否则为0，将一个模态A向量与所有模态B向量点积后，经过归一化，可以称作logits
+        # 这里的温度系数在进行归一化后应该没有任何作用
         criterion = nn.CrossEntropyLoss()
-        # suppose data in mini_batch should own different labels
+        # B: batch_size
         B = X.size()[0]
         # calculate logits by integrating text and structure features for each sample
-        logits = torch.mm(X, Y.transpose(1, 0))  # B*B
+        logits = torch.mm(X, Y.transpose(1, 0))  # Batch_size * Batch_size
         logits = torch.div(logits, args.T)
         labels = torch.arange(B).long().to(logits.device)  # B*1
 

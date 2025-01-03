@@ -3,5 +3,7 @@
 **/test.py
 ckpt/
 data/
+models/molecule_gnn_model.py
+models/graph_transformer.py
 conda_env.md
 env_build.sh
