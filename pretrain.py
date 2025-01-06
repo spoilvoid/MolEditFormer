@@ -84,14 +84,14 @@ def cycle_index(num, shift):
 #     return ret_loss
 
 
-def cl_loss(s_features, t_features, args):
+def cl_loss(X, Y, args):
     '''
-    s_features [batch_size, SSL_emb_dim]: molecular features 
-    t_features [batch_size, SSL_emb_dim]: description text features 
+    X [batch_size, SSL_emb_dim]: molecular features 
+    Y [batch_size, SSL_emb_dim]: description text features 
     '''
     if args.normalize:
-        X = F.normalize(s_features, dim=-1)
-        Y = F.normalize(t_features, dim=-1)
+        X = F.normalize(X, dim=-1)
+        Y = F.normalize(Y, dim=-1)
 
     if args.SSL_loss == 'EBM_NCE':
         criterion = nn.BCEWithLogitsLoss()
@@ -310,6 +310,8 @@ if __name__ == "__main__":
     # text branch config
     parser.add_argument("--text_emb_dim", type=int, default=768)
     parser.add_argument("--max_seq_len", type=int, default=512)
+    # smiles branch config
+    parser.add_argument("--smiles_emb_dim", type=int, default=256)
     # graph branch config
     parser.add_argument("--gnn_type", type=str, default="gin")
     parser.add_argument("--num_layer", type=int, default=5)

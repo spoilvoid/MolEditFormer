@@ -12,6 +12,7 @@ from transformers import AutoModel, AutoTokenizer
 from . import graph_transformer
 from . import GNN, GNN_graphpred
 from . import SimpleTokenizer as _Tokenizer
+from mega_molbart.mega_mol_bart import MegaMolBART
 
 _tokenizer = _Tokenizer()
 
@@ -102,7 +103,6 @@ class CLIP(nn.Module):
             
             if args.molecule_type == "2DGraph" or args.molecule_type == "all":
                 self.molecule_dim = args.gnn_emb_dim
-
                 self.molecule_node_model = GNN(
                     num_layer=args.num_layer, emb_dim=args.gnn_emb_dim,
                     JK=args.JK, drop_ratio=args.dropout_ratio,
@@ -117,7 +117,10 @@ class CLIP(nn.Module):
             if args.molecule_type == "3DGraph" or args.molecule_type == "all":
                 pass
             if args.molecule_type == "SMILES" or args.molecule_type == "all":
-                pass
+                self.molecule_wrapper = MegaMolBART(vocab_path=args.vocab_path, input_dir=args.mol_pretrain_dir, output_dir=None)
+                self.molecule_dim = args.smiles_emb_dim
+                self.molecule_model = self.molecule_wrapper.model
+                self.molecule_tokenizer = self.molecule_wrapper.tokenizer
             # load molecule projector
             self.mol2latent = nn.Linear(self.molecule_dim, args.SSL_emb_dim)
             # load molecule branch weight
@@ -145,119 +148,47 @@ class CLIP(nn.Module):
                 state_dict = torch.load(args.text_projector_path, map_location='cpu')
                 self.text2latent.load_state_dict(state_dict)
 
-        
-        # self.transformer = Transformer(
-        #     width=args.transformer_width,
-        #     layers=args.transformer_layers,
-        #     heads=args.transformer_heads,
-        #     attn_mask=self.build_attention_mask(),
-        # )
-        # self.vocab_size = args.vocab_size
-        # self.token_embedding = nn.Embedding(
-        #     args.vocab_size, args.transformer_width
-        # )  # the embedding for all possible tokens
-        # self.positional_embedding = nn.Parameter(torch.empty(self.context_length, args.transformer_width))
-        # self.ln_final = LayerNorm(args.transformer_width)
-        #
-        # self.text_projection = nn.Parameter(torch.empty(args.transformer_width, args.embed_dim))
+        self.decoder = self.molecule_wrapper.model
 
-        # if args.gnn_type == "gcn":
-        #     self.dtype = self.gnn.vars[0].dtype
-        # elif args.gnn_type == "gt":
-        #     self.dtype = self.gnn.W_pos.dtype
+    def prepare_text_tokens(self, batch_text, device):
+        text_input = self.text_tokenizer(batch_text, truncation=True, max_length=self.max_seq_len, padding='max_length', return_tensors='pt')
+        tokens_ids = text_input['input_ids'].long().to(device)
+        pad_mask = text_input['attention_mask'].bool().to(device)
+        return tokens_ids, pad_mask
 
-        # self.initialize_parameters()
-
-    # def initialize_parameters(self):
-    #     nn.init.normal_(self.token_embedding.weight, std=0.02)
-    #     nn.init.normal_(self.positional_embedding, std=0.01)
-
-    #     proj_std = (self.transformer.width ** -0.5) * ((2 * self.transformer.layers) ** -0.5)
-    #     attn_std = self.transformer.width ** -0.5
-    #     fc_std = (2 * self.transformer.width) ** -0.5
-    #     for block in self.transformer.resblocks:
-    #         nn.init.normal_(block.attn.in_proj_weight, std=attn_std)
-    #         nn.init.normal_(block.attn.out_proj.weight, std=proj_std)
-    #         nn.init.normal_(block.mlp.c_fc.weight, std=fc_std)
-    #         nn.init.normal_(block.mlp.c_proj.weight, std=proj_std)
-
-    #     if self.text_projection is not None:
-    #         nn.init.normal_(self.text_projection, std=self.transformer.width ** -0.5)
-
-    # def build_attention_mask(self):
-    #     # lazily create causal attention mask, with full attention between the vision tokens
-    #     # pytorch uses additive attention mask; fill with -inf
-    #     mask = torch.empty(self.context_length, self.context_length)
-    #     mask.fill_(float("-inf"))
-    #     mask.triu_(1)  # zero out the lower diagonal
-    #     return mask
-
-    def preprocess_each_sentence(self, sentence, tokenizer, max_seq_len):
-        text_input = tokenizer(
-            sentence, truncation=True, max_length=max_seq_len,
-            padding='max_length', return_tensors='np')
-        # print(text_input)
-        input_ids = text_input['input_ids'].squeeze()
-        attention_mask = text_input['attention_mask'].squeeze()
-
-        sentence_tokens_ids = padarray(input_ids, max_seq_len)
-        sentence_masks = padarray(attention_mask, max_seq_len)
-        return [sentence_tokens_ids, sentence_masks]
-
-    def prepare_text_tokens(self, device, description, tokenizer, max_seq_len):
-        B = len(description)
-        tokens_outputs = [self.preprocess_each_sentence(description[idx], tokenizer, max_seq_len) for idx in range(B)]
-        tokens_ids = [o[0] for o in tokens_outputs]
-        masks = [o[1] for o in tokens_outputs]
-        tokens_ids = torch.Tensor(tokens_ids).long().to(device)
-        masks = torch.Tensor(masks).bool().to(device)
-        return tokens_ids, masks
+    def prepare_smiles_tokens(self, batch_smiles, device):
+        smiles_input = self.molecule_tokenizer.tokenize(batch_smiles, pad=True)
+        token_ids = torch.tensor(self.molecule_tokenizer.convert_tokens_to_ids(smiles_input['original_tokens'])).long().to(device).T
+        pad_mask = torch.tensor(smiles_input['masked_pad_masks']).bool().to(device).T
+        token_ids = token_ids[:self.molecule_wrapper.max_model_position_embeddings]
+        pad_mask = pad_mask[:self.molecule_wrapper.max_model_position_embeddings]
+        return token_ids, pad_mask
 
     def encode_graph(self, molecule_data):
         if not self.args.mol_branch:
             raise ValueError("molecule branch should be enabled")
-        molecule_repr, _ = self.molecule_model(molecule_data)
-        molecule_repr = self.mol2latent(molecule_repr)
-        # embs = self.gnn(g)
-        # idx_train = idx_train.to(embs.device)
-        # idx_train = idx_train
-        # train_embs = embs[idx_train]
-        return molecule_repr
+        molecule_embedding, _ = self.molecule_model(molecule_data)
+        return molecule_embedding
 
-    # def encode_text(self, text):
-    #     x = self.token_embedding(text)  # [batch_size, n_ctx, d_model]
+    def encode_smiles(self, smiles_token_ids, smiles_mask):
+        encode_input = {"encoder_input": smiles_token_ids, "encoder_pad_mask": smiles_mask}
+        molecule_embedding = self.molecule_model.encode(encode_input)
+        return molecule_embedding
 
-    #     x = x + self.positional_embedding
-    #     x = x.permute(
-    #         1, 0, 2
-    #     )  # NLD -> LND, batch_size * context_length *emb_dim -> context_length * batch_size  *emb_dim
-    #     x = self.transformer(x)
-    #     x = x.permute(
-    #         1, 0, 2
-    #     )  # LND -> NLD, context_length * batch_size *emb_dim -> batch_size * context_length *emb_dim
-    #     x = self.ln_final(x)
-    #     # x.shape = [batch_size, n_ctx, transformer.width]
-    #     # take features from the eot （end of token） embedding (eot_token is the highest number in each sequence)
-    #     # so there is node need to shorten the context length
-    #     x = x[torch.arange(x.shape[0]), text.argmax(dim=-1)]  #
-    #     x = x @ self.text_projection
-    #     return x
-
-    def encode_text_from_pretrain_model(self, text, device):
+    def encode_text_from_pretrain_model(self, text_token_ids, text_mask):
         if not self.args.text_branch:
             raise ValueError("text branch should be enabled")
-        description_tokens_ids, description_masks = self.prepare_text_tokens(
-            device,
-            description=text,
-            tokenizer=self.text_tokenizer,
-            max_seq_len=self.max_seq_len
-        )
-        description_output = self.text_model(input_ids=description_tokens_ids, attention_mask=description_masks)
-        description_repr = description_output["pooler_output"]
-        description_repr = self.text2latent(description_repr)
-        return description_repr
+        description_output = self.text_model(input_ids=text_token_ids, attention_mask=text_mask)
+        description_embedding = description_output["last_hidden_state"]
+        description_pooled_latent = description_output["pooler_output"]
+        return description_embedding, description_pooled_latent
 
-    def forward(self, molecule_data, text, device):  # g, s_n, t_n, s_n_text, t_n_text
+    def decode_smiles(self, decoder_input, decoder_mask, memory):
+        decode_input = {"decoder_input": decoder_input, "decoder_pad_mask": decoder_mask, "memory_input": memory,"memory_pad_mask": decoder_mask}
+        decode_output = self.molecule_model.decode(decode_input) # logits
+        return decode_output
+
+    def forward(self, molecule_data, text, device, contrastive_loss="EBM_NCE"):
         if not (self.args.mol_branch and self.args.text_branch):
             raise ValueError("text branch and molecule branch should both be enabled")
         elif self.args.mol_branch and not self.args.text_branch:
@@ -265,25 +196,88 @@ class CLIP(nn.Module):
         elif not self.args.mol_branch and self.args.text_branch:
             raise ValueError("molecule branch should be enabled")
         
-        s_image_features = self.encode_graph(molecule_data)
+        text_token_ids, text_mask = self.prepare_text_tokens(text, device)
+        text_embedding, text_latent = self.encode_text_from_pretrain_model(text_token_ids, text_mask)    
 
-        text_features = self.encode_text_from_pretrain_model(text, device)
+        if self.args.molecule_type == "SMILES":
+            molecule_token_ids, molecule_mask = self.prepare_smiles_tokens(molecule_data, device)
+            molecule_embedding = self.encode_smiles(molecule_token_ids, molecule_mask)
+            decode_logits = self.decode_smiles(molecule_token_ids, molecule_mask, molecule_embedding)
+        elif self.args.molecule_type == "2DGraph":
+            molecule_embedding = self.encode_graph(molecule_data)
+        molecule_latent = self.mol2latent(molecule_embedding)
 
-        # t_text_features = self.encode_text(t_n_text)
-        # t_text_features = text_features.reshape(s_image_features.shape[0], self.args.neigh_num, self.args.gnn_output)
-        # text_features = torch.mean(text_features, dim=1, keepdim=False)
-        # normalized features
-        # s_image_features = s_image_features / s_image_features.norm(dim=-1, keepdim=True)
-        # s_text_features = text_features / text_features.norm(dim=-1, keepdim=True)
-        # text_features = text_features / text_features.norm(dim=-1, keepdim=True)
+        return molecule_latent, text_latent, decode_logits
 
-        # cosine similarity as logits
+    def _calc_loss(self, molecule_latent, text_latent, contrastive_loss="EBM_NCE", smiles_token_ids=None, smiles_mask=None, decoder_output=None):
+        pass
+    
+    def calc_cl_loss(self, molecule_latent, text_latent):
+    # s_features, t_features, args
+        '''
+        molecule_latent [batch_size, SSL_emb_dim]: molecular features 
+        text_latent [batch_size, SSL_emb_dim]: description text features 
+        '''
+        if self.args.normalize:
+            molecule_latent = F.normalize(molecule_latent, dim=-1)
+            text_latent = F.normalize(text_latent, dim=-1)
 
-        # labels = torch.arange(s_image_features.shape[0]).to(device)
+        if self.args.SSL_loss == 'EBM_NCE':
+            criterion = nn.BCEWithLogitsLoss()
+            # use cycle_index to form k negative samples
+            # neg_text_latent [args.CL_neg_samples * batch_size, SSL_emb_dim]: negative molecular features
+            # neg_molecule_latent [args.CL_neg_samples * batch_size, SSL_emb_dim]: negative description text features 
+            neg_text_latent = torch.cat([text_latent[cycle_index(len(Y), i + 1)] for i in range(self.args.CL_neg_samples)], dim=0)
+            neg_molecule_latent = molecule_latent.repeat((self.args.CL_neg_samples, 1))
 
-        return s_image_features, text_features
+            # calculate the cosine similarity for each sample
+            # 这里由于组播的原理这里是逐项相乘，这里sum后得到对应分子-文本对的余弦相似度，再除以温度参数
+            pred_pos = torch.sum(molecule_latent * text_latent, dim=1) / self.args.T
+            pred_neg = torch.sum(neg_molecule_latent * neg_text_latent, dim=1) / self.args.T
 
-        # return s_image_features, s_text_features, t_text_features, labels
+            # calculate the contrastive learning loss according to the weighted sum
+            loss_pos = criterion(pred_pos, torch.ones(len(pred_pos)).to(pred_pos.device))
+            loss_neg = criterion(pred_neg, torch.zeros(len(pred_neg)).to(pred_neg.device))
+            CL_loss = (loss_pos + self.args.CL_neg_samples * loss_neg) / (1 + self.args.CL_neg_samples)
+
+        elif self.args.SSL_loss == 'InfoNCE':
+            criterion = nn.CrossEntropyLoss()
+            # suppose data in mini_batch should own different labels
+            B = molecule_latent.size()[0]
+            # calculate logits by integrating text and structure features for each sample
+            logits = torch.mm(molecule_latent, text_latent.transpose(1, 0))  # B*B
+            logits = torch.div(logits, self.args.T)
+            labels = torch.arange(B).long().to(logits.device)  # B*1
+
+            CL_loss = criterion(logits, labels)
+
+        else:
+            raise Exception
+
+        return CL_loss
+
+    def _calc_mask_loss(self, smiles_token_ids, smiles_mask, decoder_output):
+        """ Calculate the loss for the token prediction task
+
+        Args:
+            smiles_token_ids (Tensor of shape (seq_len, batch_size)): Original (unmasked) SMILES token ids from the tokenizer
+            smiles_mask (Tensor of shape (seq_len, batch_size)): Pad mask for target tokens
+            decoder_output (Tensor of shape (seq_len, batch_size, vocab_size)): token output from transformer
+
+        Output:
+            loss (singleton Tensor): Loss computed using cross-entropy,
+        """  
+        pad_token_idx = self.molecule_wrapper.tokenizer.vocab[self.molecule_wrapper.tokenizer.pad_token]
+        mask_loss_func = nn.CrossEntropyLoss(reduction='none', ignore_index=pad_token_idx)
+
+        (seq_len, batch_size) = tuple(smiles_token_ids.size())
+        token_pred = decoder_output.reshape((seq_len * batch_size,
+                -1)).float()
+        loss = mask_loss_func(token_pred, smiles_token_ids.reshape(-1)).reshape((seq_len, batch_size))
+        inv_target_mask = ~(smiles_mask > 0)
+        num_tokens = inv_target_mask.sum()
+        loss = loss.sum() / num_tokens
+        return loss
 
     def save_model(self, save_dir, prefix="", config=None):
         if not osp.exists(save_dir):
