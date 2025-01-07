@@ -12,7 +12,8 @@ from transformers import AutoModel, AutoTokenizer
 from . import graph_transformer
 from . import GNN, GNN_graphpred
 from . import SimpleTokenizer as _Tokenizer
-from mega_molbart.mega_mol_bart import MegaMolBART
+from .model_utils import cycle_index, mean_pooling
+from .mega_molbart.mega_mol_bart import MegaMolBART
 
 _tokenizer = _Tokenizer()
 
@@ -130,8 +131,13 @@ class CLIP(nn.Module):
                 state_dict = torch.load(args.mol_projector_path, map_location='cpu')
                 self.mol2latent.load_state_dict(state_dict)
             else:
-                pretrained_graph_path = osp.join(args.mol_pretrain_dir, args.pretrain_gnn_mode, "model.pth")
-                self.molecule_model.from_pretrained(pretrained_graph_path)
+                if args.molecule_type == "2DGraph" or args.molecule_type == "all":
+                    pretrained_graph_path = osp.join(args.mol_pretrain_dir, args.pretrain_gnn_mode, "model.pth")
+                    self.molecule_model.from_pretrained(pretrained_graph_path)
+                if args.molecule_type == "3DGraph" or args.molecule_type == "all":
+                    pass
+                if args.molecule_type == "SMILES" or args.molecule_type == "all":
+                    pass
 
         # load text branch
         if args.text_branch:
@@ -148,8 +154,6 @@ class CLIP(nn.Module):
                 state_dict = torch.load(args.text_projector_path, map_location='cpu')
                 self.text2latent.load_state_dict(state_dict)
 
-        self.decoder = self.molecule_wrapper.model
-
     def prepare_text_tokens(self, batch_text, device):
         text_input = self.text_tokenizer(batch_text, truncation=True, max_length=self.max_seq_len, padding='max_length', return_tensors='pt')
         tokens_ids = text_input['input_ids'].long().to(device)
@@ -164,10 +168,10 @@ class CLIP(nn.Module):
         pad_mask = pad_mask[:self.molecule_wrapper.max_model_position_embeddings]
         return token_ids, pad_mask
 
-    def encode_graph(self, molecule_data):
+    def encode_graph(self, batch_graph):
         if not self.args.mol_branch:
             raise ValueError("molecule branch should be enabled")
-        molecule_embedding, _ = self.molecule_model(molecule_data)
+        molecule_embedding, _ = self.molecule_model(batch_graph)
         return molecule_embedding
 
     def encode_smiles(self, smiles_token_ids, smiles_mask):
@@ -188,72 +192,83 @@ class CLIP(nn.Module):
         decode_output = self.molecule_model.decode(decode_input) # logits
         return decode_output
 
-    def forward(self, molecule_data, text, device, contrastive_loss="EBM_NCE"):
+    def forward(self, batch_molecule, batch_text, device):
         if not (self.args.mol_branch and self.args.text_branch):
             raise ValueError("text branch and molecule branch should both be enabled")
         elif self.args.mol_branch and not self.args.text_branch:
             raise ValueError("text branch should be enabled")
         elif not self.args.mol_branch and self.args.text_branch:
             raise ValueError("molecule branch should be enabled")
-        
-        text_token_ids, text_mask = self.prepare_text_tokens(text, device)
-        text_embedding, text_latent = self.encode_text_from_pretrain_model(text_token_ids, text_mask)    
+        # text_token_ids, text_mask: [batch_size, text_max_seq_len]
+        text_token_ids, text_mask = self.prepare_text_tokens(batch_text, device)
+        # text_embedding: [batch_size, text_max_seq_len, text_d_model]
+        # text_pooled_embedding: [batch_size, text_d_model]
+        text_embedding, text_pooled_embedding = self.encode_text_from_pretrain_model(text_token_ids, text_mask)  
+        # text_repr: [batch_size, text_d_model]
+        text_repr = mean_pooling(text_embedding.transpose(0, 1), text_mask.transpose(0, 1))
+        # text_latent: [batch_size, SSL_emb_dim]
+        text_latent = self.text2latent(text_repr)
 
         if self.args.molecule_type == "SMILES":
-            molecule_token_ids, molecule_mask = self.prepare_smiles_tokens(molecule_data, device)
+            # molecule_token_ids, molecule_mask: [mol_max_seq_len, batch_size]
+            molecule_token_ids, molecule_mask = self.prepare_smiles_tokens(batch_molecule, device)
+            # molecule_embedding: [mol_max_seq_len, batch_size, mol_d_model]
             molecule_embedding = self.encode_smiles(molecule_token_ids, molecule_mask)
+            # molecule_repr: [batch_size, mol_d_model]
+            molecule_repr = mean_pooling(molecule_embedding, ~molecule_mask)
+            # decode_logits: [mol_max_seq_len, batch_size, vocab_size]
             decode_logits = self.decode_smiles(molecule_token_ids, molecule_mask, molecule_embedding)
         elif self.args.molecule_type == "2DGraph":
-            molecule_embedding = self.encode_graph(molecule_data)
-        molecule_latent = self.mol2latent(molecule_embedding)
+            molecule_repr = self.encode_graph(batch_molecule)
+        # molecule_latent: [batch_size, SSL_emb_dim]
+        molecule_latent = self.mol2latent(molecule_repr)
 
-        return molecule_latent, text_latent, decode_logits
+        cl_loss, mask_loss = self._calc_loss(molecule_latent, text_latent, molecule_token_ids, molecule_mask, decode_logits)
+        return cl_loss, mask_loss
 
-    def _calc_loss(self, molecule_latent, text_latent, contrastive_loss="EBM_NCE", smiles_token_ids=None, smiles_mask=None, decoder_output=None):
-        pass
+    def _calc_loss(self, molecule_latent, text_latent, smiles_token_ids=None, smiles_mask=None, decoder_output=None):
+        cl_loss = (self._calc_cl_loss(molecule_latent, text_latent) + self._calc_cl_loss(text_latent, molecule_latent)) / 2
+        if smiles_token_ids is not None and smiles_mask is not None and decoder_output is not None:
+            mask_loss = self._calc_mask_loss(smiles_token_ids, smiles_mask, decoder_output)
+            return cl_loss, mask_loss
+        else:
+            return cl_loss, None
     
-    def calc_cl_loss(self, molecule_latent, text_latent):
-    # s_features, t_features, args
+    def _calc_cl_loss(self, latent_1, latent_2):
         '''
-        molecule_latent [batch_size, SSL_emb_dim]: molecular features 
-        text_latent [batch_size, SSL_emb_dim]: description text features 
+        latent_1 [batch_size, SSL_emb_dim]: molecular features or text features 
+        latent_2 [batch_size, SSL_emb_dim]: molecular features or text features 
         '''
         if self.args.normalize:
-            molecule_latent = F.normalize(molecule_latent, dim=-1)
-            text_latent = F.normalize(text_latent, dim=-1)
+            latent_1 = F.normalize(latent_1, dim=-1)
+            latent_2 = F.normalize(latent_2, dim=-1)
 
         if self.args.SSL_loss == 'EBM_NCE':
             criterion = nn.BCEWithLogitsLoss()
             # use cycle_index to form k negative samples
-            # neg_text_latent [args.CL_neg_samples * batch_size, SSL_emb_dim]: negative molecular features
-            # neg_molecule_latent [args.CL_neg_samples * batch_size, SSL_emb_dim]: negative description text features 
-            neg_text_latent = torch.cat([text_latent[cycle_index(len(Y), i + 1)] for i in range(self.args.CL_neg_samples)], dim=0)
-            neg_molecule_latent = molecule_latent.repeat((self.args.CL_neg_samples, 1))
-
+            # neg_latent_1 [args.CL_neg_samples * batch_size, SSL_emb_dim]: negative molecular features or text features 
+            # neg_latent_2 [args.CL_neg_samples * batch_size, SSL_emb_dim]: negative molecular features or text features 
+            neg_latent_2 = torch.cat([latent_2[cycle_index(len(latent_2), i + 1)] for i in range(self.args.CL_neg_samples)], dim=0)
+            neg_latent_1 = latent_1.repeat((self.args.CL_neg_samples, 1))
             # calculate the cosine similarity for each sample
             # 这里由于组播的原理这里是逐项相乘，这里sum后得到对应分子-文本对的余弦相似度，再除以温度参数
-            pred_pos = torch.sum(molecule_latent * text_latent, dim=1) / self.args.T
-            pred_neg = torch.sum(neg_molecule_latent * neg_text_latent, dim=1) / self.args.T
-
+            pred_pos = torch.sum(latent_1 * latent_2, dim=1) / self.args.T
+            pred_neg = torch.sum(neg_latent_1 * neg_latent_2, dim=1) / self.args.T
             # calculate the contrastive learning loss according to the weighted sum
             loss_pos = criterion(pred_pos, torch.ones(len(pred_pos)).to(pred_pos.device))
             loss_neg = criterion(pred_neg, torch.zeros(len(pred_neg)).to(pred_neg.device))
             CL_loss = (loss_pos + self.args.CL_neg_samples * loss_neg) / (1 + self.args.CL_neg_samples)
-
         elif self.args.SSL_loss == 'InfoNCE':
             criterion = nn.CrossEntropyLoss()
             # suppose data in mini_batch should own different labels
-            B = molecule_latent.size()[0]
+            B = latent_1.size()[0]
             # calculate logits by integrating text and structure features for each sample
-            logits = torch.mm(molecule_latent, text_latent.transpose(1, 0))  # B*B
+            logits = torch.mm(latent_1, latent_2.transpose(1, 0))  # B*B
             logits = torch.div(logits, self.args.T)
             labels = torch.arange(B).long().to(logits.device)  # B*1
-
             CL_loss = criterion(logits, labels)
-
         else:
             raise Exception
-
         return CL_loss
 
     def _calc_mask_loss(self, smiles_token_ids, smiles_mask, decoder_output):
@@ -278,6 +293,24 @@ class CLIP(nn.Module):
         num_tokens = inv_target_mask.sum()
         loss = loss.sum() / num_tokens
         return loss
+
+    def sample_molecules(self, batch_input, sampling_alg="greedy"):
+        """Sample molecules from the model
+
+        Args:
+            batch_input (dict): Input given to model, should contain batch['encoder_input] meaning Smiles token_ids and batch['encoder_pad_mask'] meaning Smiles pad_mask
+            sampling_alg (str): Algorithm to use to sample SMILES strings from model, choice = ['greedy', 'beam']
+
+        Returns:
+            ([[str]], [[float]]): Tuple of molecule SMILES strings and log lhs (outer dimension is batch)
+        """
+        if self.args.molecule_type == "2DGraph" or self.args.molecule_type == "all":
+            pass
+        if self.args.molecule_type == "3DGraph" or self.args.molecule_type == "all":
+            pass
+        if self.args.molecule_type == "SMILES" or self.args.molecule_type == "all":
+            mol_strs, log_lhs = self.molecule_model.sample_molecules(batch_input=batch_input, sampling_alg=sampling_alg)
+        return mol_strs, log_lhs
 
     def save_model(self, save_dir, prefix="", config=None):
         if not osp.exists(save_dir):

@@ -5,3 +5,6 @@ ckpt/
 data/
 conda_env.md
 env_build.sh
+models/MLP.py
+models/graph_transformer.py
+main_train.py

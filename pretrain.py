@@ -64,15 +64,15 @@ class batch_based_WarmupCosineLR_step(_LRScheduler):
             return [base_lr * cosine_decay for base_lr in self.base_lrs]
 
 
-def cycle_index(num, shift):
-    '''
-    num, shift: int
-    num > shift > 0
-    return [shift, shift+1, ..., num-1, 0, 1, ..., shift-1]
-    '''
-    arr = torch.arange(num) + shift
-    arr[-shift:] = torch.arange(shift)
-    return arr
+# def cycle_index(num, shift):
+#     '''
+#     num, shift: int
+#     num > shift > 0
+#     return [shift, shift+1, ..., num-1, 0, 1, ..., shift-1]
+#     '''
+#     arr = torch.arange(num) + shift
+#     arr[-shift:] = torch.arange(shift)
+#     return arr
 
 
 # def cal_cl_loss(s_features, t_features, labels):
@@ -84,61 +84,61 @@ def cycle_index(num, shift):
 #     return ret_loss
 
 
-def cl_loss(X, Y, args):
-    '''
-    X [batch_size, SSL_emb_dim]: molecular features 
-    Y [batch_size, SSL_emb_dim]: description text features 
-    '''
-    if args.normalize:
-        X = F.normalize(X, dim=-1)
-        Y = F.normalize(Y, dim=-1)
+# def cl_loss(X, Y, args):
+#     '''
+#     X [batch_size, SSL_emb_dim]: molecular features 
+#     Y [batch_size, SSL_emb_dim]: description text features 
+#     '''
+#     if args.normalize:
+#         X = F.normalize(X, dim=-1)
+#         Y = F.normalize(Y, dim=-1)
 
-    if args.SSL_loss == 'EBM_NCE':
-        criterion = nn.BCEWithLogitsLoss()
-        # use cycle_index to form k negative samples
-        # neg_X [args.CL_neg_samples * batch_size, SSL_emb_dim]: negative molecular features
-        # neg_Y [args.CL_neg_samples * batch_size, SSL_emb_dim]: negative description text features 
-        neg_Y = torch.cat([Y[cycle_index(len(Y), i + 1)] for i in range(args.CL_neg_samples)], dim=0)
-        neg_X = X.repeat((args.CL_neg_samples, 1))
+#     if args.SSL_loss == 'EBM_NCE':
+#         criterion = nn.BCEWithLogitsLoss()
+#         # use cycle_index to form k negative samples
+#         # neg_X [args.CL_neg_samples * batch_size, SSL_emb_dim]: negative molecular features
+#         # neg_Y [args.CL_neg_samples * batch_size, SSL_emb_dim]: negative description text features 
+#         neg_Y = torch.cat([Y[cycle_index(len(Y), i + 1)] for i in range(args.CL_neg_samples)], dim=0)
+#         neg_X = X.repeat((args.CL_neg_samples, 1))
 
-        # calculate the cosine similarity for each sample
-        # 这里由于组播的原理这里是逐项相乘，这里sum后得到对应分子-文本对的余弦相似度，再除以温度参数
-        pred_pos = torch.sum(X * Y, dim=1) / args.T
-        pred_neg = torch.sum(neg_X * neg_Y, dim=1) / args.T
+#         # calculate the cosine similarity for each sample
+#         # 这里由于组播的原理这里是逐项相乘，这里sum后得到对应分子-文本对的余弦相似度，再除以温度参数
+#         pred_pos = torch.sum(X * Y, dim=1) / args.T
+#         pred_neg = torch.sum(neg_X * neg_Y, dim=1) / args.T
 
-        # calculate the contrastive learning loss according to the weighted sum
-        loss_pos = criterion(pred_pos, torch.ones(len(pred_pos)).to(pred_pos.device))
-        loss_neg = criterion(pred_neg, torch.zeros(len(pred_neg)).to(pred_neg.device))
-        CL_loss = (loss_pos + args.CL_neg_samples * loss_neg) / (1 + args.CL_neg_samples)
+#         # calculate the contrastive learning loss according to the weighted sum
+#         loss_pos = criterion(pred_pos, torch.ones(len(pred_pos)).to(pred_pos.device))
+#         loss_neg = criterion(pred_neg, torch.zeros(len(pred_neg)).to(pred_neg.device))
+#         CL_loss = (loss_pos + args.CL_neg_samples * loss_neg) / (1 + args.CL_neg_samples)
 
-        # calculate the contrastive learning accuracy(pred_pos > 0 and pred_neg < 0)
-        CL_acc = (torch.sum(pred_pos > 0).float() + torch.sum(pred_neg < 0).float()) / \
-                (len(pred_pos) + len(pred_neg))
-        CL_acc = CL_acc.detach().cpu().item()
+#         # calculate the contrastive learning accuracy(pred_pos > 0 and pred_neg < 0)
+#         CL_acc = (torch.sum(pred_pos > 0).float() + torch.sum(pred_neg < 0).float()) / \
+#                 (len(pred_pos) + len(pred_neg))
+#         CL_acc = CL_acc.detach().cpu().item()
 
-    elif args.SSL_loss == 'InfoNCE':
-        criterion = nn.CrossEntropyLoss()
-        # suppose data in mini_batch should own different labels
-        B = X.size()[0]
-        # calculate logits by integrating text and structure features for each sample
-        logits = torch.mm(X, Y.transpose(1, 0))  # B*B
-        logits = torch.div(logits, args.T)
-        labels = torch.arange(B).long().to(logits.device)  # B*1
+#     elif args.SSL_loss == 'InfoNCE':
+#         criterion = nn.CrossEntropyLoss()
+#         # suppose data in mini_batch should own different labels
+#         B = X.size()[0]
+#         # calculate logits by integrating text and structure features for each sample
+#         logits = torch.mm(X, Y.transpose(1, 0))  # B*B
+#         logits = torch.div(logits, args.T)
+#         labels = torch.arange(B).long().to(logits.device)  # B*1
 
-        CL_loss = criterion(logits, labels)
-        pred = logits.argmax(dim=1, keepdim=False)
-        CL_acc = pred.eq(labels).sum().detach().cpu().item() * 1. / B
+#         CL_loss = criterion(logits, labels)
+#         pred = logits.argmax(dim=1, keepdim=False)
+#         CL_acc = pred.eq(labels).sum().detach().cpu().item() * 1. / B
 
-    else:
-        raise Exception
+#     else:
+#         raise Exception
 
-    return CL_loss, CL_acc
+#     return CL_loss, CL_acc
 
 
-def assure_dir(path):
-    dir = os.path.dirname(path)
-    if not os.path.exists(dir):
-        os.makedirs(dir)
+# def assure_dir(path):
+#     dir = os.path.dirname(path)
+#     if not os.path.exists(dir):
+#         os.makedirs(dir)
 
 
 def main(args):
@@ -168,32 +168,19 @@ def main(args):
     elif args.data_source == "MolPair":
         train_set = MolPair_SingleGraph(args.data_dir)
     train_loader = pyg_DataLoader(train_set, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
-    if args.repr_frozen:
-        freeze_network(model.text_model)
-        freeze_network(model.molecule_model)
-        model_param_group = [
-            {"params": model.text2latent.parameters(), "lr": args.text_lr * args.text_lr_scale},
-            {"params": model.mol2latent.parameters(), "lr": args.graph_lr * args.graph_lr_scale},
-        ]
-        save_config = {
-            "text_model": False,
-            "molecule_model": False,
-            "text2latent": True,
-            "mol2latent": True,
-        }
-    else:
-        model_param_group = [
-            {"params": model.text_model.parameters(), "lr": args.text_lr},
-            {"params": model.molecule_model.parameters(), "lr": args.graph_lr},
-            {"params": model.text2latent.parameters(), "lr": args.text_lr * args.text_lr_scale},
-            {"params": model.mol2latent.parameters(), "lr": args.graph_lr * args.graph_lr_scale},
-        ]
-        save_config = {
-            "text_model": True,
-            "molecule_model": True,
-            "text2latent": True,
-            "mol2latent": True,
-        }
+
+    model_param_group = [
+        {"params": model.text_model.parameters(), "lr": args.text_lr},
+        {"params": model.molecule_model.parameters(), "lr": args.graph_lr},
+        {"params": model.text2latent.parameters(), "lr": args.text_lr * args.text_lr_scale},
+        {"params": model.mol2latent.parameters(), "lr": args.graph_lr * args.graph_lr_scale},
+    ]
+    save_config = {
+        "text_model": True,
+        "molecule_model": True,
+        "text2latent": True,
+        "mol2latent": True,
+    }
     optimizer = optim.Adam(model_param_group, weight_decay=args.weight_decay)
     if args.warmup_choice == "no":
         pass
@@ -213,36 +200,23 @@ def main(args):
                 raise ValueError("Invalid molecule type")
             
             if args.molecule_type == "2DGraph" or args.molecule_type == "all":
-                graph_batched = sample_batched[2].to(device)
+                molecule_batched = sample_batched[2].to(device)
             if args.molecule_type == "3DGraph" or args.molecule_type == "all":
                 pass
             if args.molecule_type == "SMILES" or args.molecule_type == "all":
-                SMILES_batched = sample_batched[0]
+                molecule_batched = sample_batched[0]
 
             description_batched = sample_batched[1]
-
-            # s_n, t_n = sample_batched["s_n"], sample_batched["t_n"]
-            # s_n_arr = s_n.numpy()  # .reshape((1, -1))
-            # t_n_arr = t_n.numpy().reshape(-1)
-            # s_n_text, t_n_text = [new_dict[i] for i in s_n_arr], [new_dict[j] for j in t_n_arr]
-            # s_n_text, t_n_text = tokenize(s_n_text, context_length=args.context_length).to(device), tokenize(
-            #     t_n_text, context_length=args.context_length
-            # ).to(device)
-            # s_n, t_n = s_n.long().to(device), t_n.long().to(device)
             
             # forward and backward
-            image_features, text_features = model(graph_batched, description_batched, device)
+            '''
+            image_features, text_features = model(molecule_batched, description_batched, device)
             # for contrastive learning loss isn't symmetric, we need to average the loss
             loss_01, acc_01 = cl_loss(text_features, image_features, args)
             loss_02, acc_02 = cl_loss(image_features, text_features, args)
             all_loss = (loss_01 + loss_02) / 2
             all_acc = (acc_01 + acc_02) / 2
-            # node_loss = cal_cl_loss(s_image_features, s_text_features, labels)
-            # gt_loss = cal_cl_loss(s_image_features, t_text_features, labels)
-            # tt_loss = cal_cl_loss(s_text_features, t_text_features, labels)
-
-            # all_loss = node_loss + args.edge_coef * gt_loss + args.edge_coef * tt_loss
-
+            
             optimizer.zero_grad()
             torch.cuda.empty_cache()
             all_loss.backward()
@@ -258,7 +232,27 @@ def main(args):
                 if loss < optimal_loss:
                     model.save_model(model_save_dir, f"epoch{epoch_id}_batch{i_batch+1}", save_config)
             epoch_loss += loss / len(train_loader)
-        
+            '''
+            cl_loss, mask_loss = model(molecule_batched, description_batched, device)
+            all_loss = cl_loss + args.alpha * mask_loss
+            optimizer.zero_grad()
+            torch.cuda.empty_cache()
+            all_loss.backward()
+            optimizer.step()
+            if args.warmup_choice == "batch":
+                scheduler.step()
+
+            # information record and save model
+            loss = round((all_loss.detach().clone()).cpu().item(), 4)
+            if (epoch_id * len(train_loader) + i_batch + 1) % args.log_freq == 0:
+                logger.log("{} epoch {}th batch loss in :{}".format(epoch_id + 1, i_batch + 1, loss))
+                writer.add_scalar("Train_Loss/batch", loss, epoch_id * len(train_loader) + i_batch + 1)
+                writer.add_scalar("Train_CL_Loss/batch", cl_loss, epoch_id * len(train_loader) + i_batch + 1)
+                writer.add_scalar("Train_decoder_Loss/batch", mask_loss, epoch_id * len(train_loader) + i_batch + 1)
+                if loss < optimal_loss:
+                    model.save_model(model_save_dir, f"epoch{epoch_id}_batch{i_batch+1}", save_config)
+            epoch_loss += loss / len(train_loader)
+
         if args.warmup_choice == "epoch":
             scheduler.step()
 
@@ -298,8 +292,6 @@ if __name__ == "__main__":
     parser.add_argument("--weight_decay", type=float, default=0)
     # model config
     parser.add_argument("--molecule_type", type=str, default="2DGraph", choices=["2DGraph", "3DGraph", "SMILES", "all"])
-    parser.add_argument("--repr_frozen", dest='repr_frozen', action='store_true')
-    parser.add_argument('--no_repr_frozen', dest='repr_frozen', action='store_false')
     parser.set_defaults(repr_frozen=False)
     parser.add_argument("--mol_branch", dest='mol_branch', action='store_true')
     parser.add_argument('--no_mol_branch', dest='mol_branch', action='store_false')
@@ -311,6 +303,8 @@ if __name__ == "__main__":
     parser.add_argument("--text_emb_dim", type=int, default=768)
     parser.add_argument("--max_seq_len", type=int, default=512)
     # smiles branch config
+    parser.add_argument('--smiles_model_type', type=str, default="MegaMolBART", choices=["MegaMolBART"])
+    parser.add_argument("--vocab_path", type=str, default="bart_vocab.txt")
     parser.add_argument("--smiles_emb_dim", type=int, default=256)
     # graph branch config
     parser.add_argument("--gnn_type", type=str, default="gin")
@@ -344,6 +338,8 @@ if __name__ == "__main__":
     parser.add_argument('--normalize', dest='normalize', action='store_true')
     parser.add_argument('--no_normalize', dest='normalize', action='store_false')
     parser.set_defaults(normalize=True)
+    # loss config
+    parser.add_argument("--alpha", type=float, default=0.1)
 
 
     # parser.add_argument("--edge_coef", type=float, default=10)
