@@ -20,7 +20,7 @@ from torch_geometric.data import Data
 from torch_geometric.loader import DataLoader as pyg_DataLoader
 from transformers import AutoModel, AutoTokenizer
 
-from models import CLIP, tokenize
+from models import CLIP
 from datasets import PubChemEdit, MolPair_SingleGraph , DataHelper, MolGraphDataset
 
 from basic_utils import get_local_time, freeze_network, seed_all, Logger
@@ -146,10 +146,7 @@ def main(args):
     device = torch.device("cuda:{}".format(args.gpu) if torch.cuda.is_available() else "cpu")
     print("device:", device)
     if args.dir_name == "":
-        if args.warmup_choice == "epoch":
-            model_save_dir = osp.join(args.store_dir, f"{args.data_source}_{args.molecule_type}_{args.gnn_type}_warmup_{args.warmup_choice}{args.warmup_epoch}")
-        else:
-            model_save_dir = osp.join(args.store_dir, f"{args.data_source}_{args.molecule_type}_{args.gnn_type}_warmup_{args.warmup_choice}{args.warmup_batch}")
+        model_save_dir = osp.join(args.store_dir, f"{args.data_source}_{args.molecule_type}")
     else:
         model_save_dir = osp.join(args.store_dir, args.dir_name)
     if not osp.exists(model_save_dir):
@@ -157,14 +154,56 @@ def main(args):
     logger = Logger(osp.join(model_save_dir, "log"), args.time_log)
     writer = SummaryWriter(osp.join(model_save_dir, "tensorboard"))
 
-    model = CLIP(args).to(device)
+    CL_args = {
+        "CL_emb_dim": args.SSL_emb_dim,
+        "CL_loss": args.SSL_loss,
+        "CL_neg_samples": args.CL_neg_samples,
+        "T": args.T,
+        "normalize": args.normalize,
+        "mol2latent_path": None, 
+        "text2latent_path": None,
+    }
+    if args.molecule_type in ["2DGraph", "all"]:
+        mol_args = {
+            "molecule_type": args.molecule_type,
+            "gnn_type": args.gnn_type,
+            "num_layer": args.num_layer,
+            "gnn_emb_dim": args.gnn_emb_dim,
+            "JK": args.JK,
+            "dropout_ratio": args.dropout_ratio,
+            "graph_pooling": args.graph_pooling,
+            "model_path": args.mol_model_path,
+        }
+    if args.molecule_type in ["3DGraph", "all"]:
+        pass
+    if args.molecule_type in ["SMILES", "all"]:
+        mol_args = {
+            "molecule_type": args.molecule_type,
+            "smiles_emb_dim": args.smiles_emb_dim, 
+            "vocab_path" : args.smiles_vocab_path, 
+            "model_path": args.mol_model_path,
+        }
+
+    text_args = {
+        "text_emb_dim": args.text_emb_dim,
+        "max_seq_len": args.max_seq_len,
+        "tokenizer_dir": args.text_tokenizer_dir,
+        "model_path": args.text_model_path,
+    }
+
+    model = CLIP(
+        mol_branch=args.mol_branch,
+        text_branch=args.text_branch,
+        mode=args.model_mode,
+        device=device,
+        mol_args=mol_args,
+        text_args=text_args,
+        CL_args=CL_args,
+    ).to(device)
     model.train()
-    # dataset = DataHelper(arr_edge_index, args)
-    # in_g = Data(x=node_f, edge_index=edge_index).to(device)
-    # dataset = MolGraphDataset(args.graph_root)
 
     if args.data_source == "PubChemEdit":
-        train_set = PubChemEdit(args.data_dir, mode=args.mode, can_smiles=args.can_smiles)
+        train_set = PubChemEdit(args.data_dir, mode=args.dataset_mode, can_smiles=args.can_smiles)
     elif args.data_source == "MolPair":
         train_set = MolPair_SingleGraph(args.data_dir)
     train_loader = pyg_DataLoader(train_set, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
@@ -199,12 +238,14 @@ def main(args):
             if args.molecule_type not in ["2DGraph", "3DGraph", "SMILES", "all"]:
                 raise ValueError("Invalid molecule type")
             
-            if args.molecule_type == "2DGraph" or args.molecule_type == "all":
+            if args.molecule_type == "2DGraph":
                 molecule_batched = sample_batched[2].to(device)
-            if args.molecule_type == "3DGraph" or args.molecule_type == "all":
+            elif args.molecule_type == "3DGraph":
                 pass
-            if args.molecule_type == "SMILES" or args.molecule_type == "all":
+            elif args.molecule_type == "SMILES":
                 molecule_batched = sample_batched[0]
+            elif args.molecule_type == "all":
+                pass
 
             description_batched = sample_batched[1]
             
@@ -233,7 +274,7 @@ def main(args):
                     model.save_model(model_save_dir, f"epoch{epoch_id}_batch{i_batch+1}", save_config)
             epoch_loss += loss / len(train_loader)
             '''
-            cl_loss, mask_loss = model(molecule_batched, description_batched, device)
+            cl_loss, mask_loss = model(molecule_batched, description_batched)
             all_loss = cl_loss + args.alpha * mask_loss
             optimizer.zero_grad()
             torch.cuda.empty_cache()
@@ -272,12 +313,13 @@ if __name__ == "__main__":
     # dataset config
     parser.add_argument("--data_source", type=str, default="PubChemEdit", choices=["PubChemEdit", "MolPair"])
     parser.add_argument("--data_dir", type=str, default="data/PubChemEdit/version_0")
-    parser.add_argument("--mode", type=str, default="full", choices=["full", "main", "expand"])
+    parser.add_argument("--dataset_mode", type=str, default="full", choices=["full", "main", "expand"])
     parser.add_argument("--can_smiles", action="store_true")
     # dataloader config
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--num_workers", type=int, default=8)
     # train config
+    parser.add_argument("--model_mode", type=str, default="pretrain", choices=["pretrain", "finetune", "inference"])
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--gpu", type=int, default=1)
     parser.add_argument("--start_epoch", type=int, default=0)
@@ -304,7 +346,7 @@ if __name__ == "__main__":
     parser.add_argument("--max_seq_len", type=int, default=512)
     # smiles branch config
     parser.add_argument('--smiles_model_type', type=str, default="MegaMolBART", choices=["MegaMolBART"])
-    parser.add_argument("--vocab_path", type=str, default="bart_vocab.txt")
+    parser.add_argument("--smiles_vocab_path", type=str, default="ckpt/MegaMolBART/bart_vocab.txt")
     parser.add_argument("--smiles_emb_dim", type=int, default=256)
     # graph branch config
     parser.add_argument("--gnn_type", type=str, default="gin")
@@ -313,19 +355,14 @@ if __name__ == "__main__":
     parser.add_argument('--JK', type=str, default='last')
     parser.add_argument("--dropout_ratio", type=float, default=0.5)
     parser.add_argument('--graph_pooling', type=str, default='mean')
-    parser.add_argument("--pretrain_gnn_mode", type=str, default="GraphMVP_G", choices=["GraphMVP_G", "GraphMVP_C"])
     # projector config
     parser.add_argument("--SSL_emb_dim", type=int, default=256)
     # load config
-    parser.add_argument('--text_pretrain_dir', type=str, default='ckpt/SciBERT')
-    parser.add_argument('--mol_pretrain_dir', type=str, default='ckpt/GraphMVP')
-    parser.add_argument('--resume', action='store_true')
-    parser.add_argument('--no_resume', dest='resume', action='store_false')
-    parser.set_defaults(resume=False)
-    parser.add_argument('--text_model_path', type=str, default='ckpt/mol_align/text_model.pth')
-    parser.add_argument('--text_projector_path', type=str, default='ckpt/mol_align/text_projector.pth')
-    parser.add_argument('--mol_model_path', type=str, default='ckpt/mol_align/mol_model.pth')
-    parser.add_argument('--mol_projector_path', type=str, default='ckpt/mol_align/mol_projector.pth')
+    parser.add_argument('--text_tokenizer_dir', type=str, default='ckpt/SciBERT')
+    parser.add_argument('--text_model_path', type=str, default=None)
+    parser.add_argument('--mol_model_path', type=str, default='ckpt/MegaMolBART/model_weight.pth')
+    parser.add_argument('--text_projector_path', type=str, default=None)
+    parser.add_argument('--mol_projector_path', type=str, default=None)
     # save config
     parser.add_argument("--store_dir", type=str, default="ckpt/MolAlign/pretrain")
     parser.add_argument("--dir_name", type=str, default="")
@@ -340,25 +377,6 @@ if __name__ == "__main__":
     parser.set_defaults(normalize=True)
     # loss config
     parser.add_argument("--alpha", type=float, default=0.1)
-
-
-    # parser.add_argument("--edge_coef", type=float, default=10)
-    # parser.add_argument("--aggregation_times", type=int, default=2, help="Aggregation times")
-
-
-    # parser.add_argument("--neigh_num", type=int, default=3)
-    # parser.add_argument("--context_length", type=int, default=128)
-    # parser.add_argument("--embed_dim", type=int, default=128)
-    # parser.add_argument("--transformer_heads", type=int, default=8)
-    # parser.add_argument("--transformer_layers", type=int, default=12)
-    # parser.add_argument("--transformer_width", type=int, default=512)
-    # parser.add_argument("--vocab_size", type=int, default=49408)  # 49408
-    # parser.add_argument("--num_nodes", type=int, default=1)
-    # parser.add_argument("--gt_layers", type=int, default=3)
-    # parser.add_argument("--att_d_model", type=int, default=128)
-    # parser.add_argument("--att_norm", type=bool, default=True)
-    # parser.add_argument("--head", type=int, default=8)
-    # parser.add_argument("--if_pos", type=bool, default=False)
 
     args = parser.parse_args()
 

@@ -1,6 +1,8 @@
 **/__pycache__/
 **/test.ipynb
 **/test.py
+**/data_exploration.ipynb
+**/data_exploration.py
 ckpt/
 data/
 conda_env.md
@@ -8,3 +10,4 @@ env_build.sh
 models/MLP.py
 models/graph_transformer.py
 main_train.py
+text_retrieval.py

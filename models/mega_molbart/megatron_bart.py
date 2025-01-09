@@ -547,8 +547,7 @@ class MegatronBART(MegatronModule):
         encoder_input = batch['encoder_input']
         encoder_pad_mask = batch['encoder_pad_mask'].transpose(0, 1)
         encoder_embs = self._construct_input(encoder_input)
-        model_output = self.encoder(encoder_embs,
-                                    src_key_padding_mask=encoder_pad_mask)
+        model_output = self.encoder(encoder_embs, src_key_padding_mask=encoder_pad_mask)
         return model_output
 
     def decode(self, batch):
@@ -716,11 +715,10 @@ class MegatronBART(MegatronModule):
             #self.sampler.device = self.device
             if sampling_alg == 'greedy':
                 (mol_strs, log_lhs) = \
-                    self.sampler.greedy_decode(decode_fn, batch_size,device=memory.device)
+                    self.sampler.greedy_decode(decode_fn, batch_size, device=memory.device)
             elif sampling_alg == 'beam':
                 (mol_strs, log_lhs) = \
-                    self.sampler.beam_decode(decode_fn, batch_size,
-                        self.num_beams,device=memory.device)
+                    self.sampler.beam_decode(decode_fn, batch_size, device=memory.device, k=self.num_beams)
 
         # Must remember to unfreeze!
         #model.train()

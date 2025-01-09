@@ -1,8 +1,10 @@
 import os
 import os.path as osp
+from pathlib import Path
 import copy
 import numpy as np
 from typing import Callable, Optional, Union, Any, List
+from collections import OrderedDict
 from collections.abc import Sequence
 
 import torch
@@ -22,7 +24,12 @@ from torch_geometric.typing import (
 )
 from torch_geometric.nn.conv.gcn_conv import gcn_norm
 from ogb.graphproppred.mol_encoder import BondEncoder
+from megatron.initialize import initialize_megatron
 
+from .mega_molbart.decoder import DecodeSampler
+from .mega_molbart.tokenizer import MolEncTokenizer
+from .mega_molbart.megatron_bart import MegatronBART
+from .mega_molbart.util import (REGEX, DEFAULT_CHEM_TOKEN_START, DEFAULT_MAX_SEQ_LEN, DEFAULT_VOCAB_PATH, DEFAULT_NUM_LAYERS, DEFAULT_D_MODEL, DEFAULT_NUM_HEADS)
 
 def cycle_index(num, shift):
     '''
@@ -69,19 +76,76 @@ def mean_pooling(token_embeddings, attention_mask):
     return sum_embeddings / sum_mask
 
 
-class LayerNorm(nn.LayerNorm):
-    """
-    Subclass torch's LayerNorm to handle fp16.
-    """
-    def forward(self, x: torch.Tensor):
-        orig_type = x.dtype
-        ret = super().forward(x.type(torch.float32))
-        return ret.type(orig_type)
+# class LayerNorm(nn.LayerNorm):
+#     """
+#     Subclass torch's LayerNorm to handle fp16.
+#     """
+#     def forward(self, x: torch.Tensor):
+#         orig_type = x.dtype
+#         ret = super().forward(x.type(torch.float32))
+#         return ret.type(orig_type)
 
 
-class QuickGELU(nn.Module):
-    def forward(self, x: torch.Tensor):
-        return x * torch.sigmoid(1.702 * x)
+# class QuickGELU(nn.Module):
+#     def forward(self, x: torch.Tensor):
+#         return x * torch.sigmoid(1.702 * x)
+
+
+# class ResidualAttentionBlock(nn.Module):
+#     def __init__(self, d_model: int, n_head: int, attn_mask: torch.Tensor = None):
+#         super().__init__()
+
+#         self.attn = nn.MultiheadAttention(d_model, n_head)
+#         self.ln_1 = LayerNorm(d_model)
+#         self.mlp = nn.Sequential(
+#             OrderedDict(
+#                 [
+#                     ("c_fc", nn.Linear(d_model, d_model * 4)),
+#                     ("gelu", QuickGELU()),
+#                     ("c_proj", nn.Linear(d_model * 4, d_model)),
+#                 ]
+#             )
+#         )
+#         self.ln_2 = LayerNorm(d_model)
+#         self.attn_mask = attn_mask
+
+#     def attention(self, x: torch.Tensor):
+#         self.attn_mask = self.attn_mask.to(dtype=x.dtype, device=x.device) if self.attn_mask is not None else None
+#         return self.attn(x, x, x, need_weights=False, attn_mask=self.attn_mask)[0]
+
+#     def forward(self, x: torch.Tensor):
+#         x = x + self.attention(self.ln_1(x))
+#         x = x + self.mlp(self.ln_2(x))
+#         return x
+
+
+# class Transformer(nn.Module):
+#     def __init__(self, width: int, layers: int, heads: int, attn_mask: torch.Tensor = None):
+#         super().__init__()
+#         self.width = width
+#         self.layers = layers
+#         self.resblocks = nn.Sequential(*[ResidualAttentionBlock(width, heads, attn_mask) for _ in range(layers)])
+
+#     def forward(self, x: torch.Tensor):
+#         return self.resblocks(x)
+
+
+class ArgsContainer:
+    def __init__(self, **kwargs):
+        for key, value in kwargs.items():
+            # 如果值是字典，递归转换为 ArgsContainer
+            # if isinstance(value, dict):
+            #     value = ArgsContainer(**value)
+            setattr(self, key, value)
+
+    def keys(self):
+        return list(self.__dict__.keys())
+
+    def values(self):
+        return list(self.__dict__.values())
+    
+    def __repr__(self):
+        return f"ArgsContainer({self.__dict__})"
 
 
 class MLP(nn.Module):
@@ -355,6 +419,80 @@ class EdgeGCNConv(MessagePassing):
             edge_attr = self.bond_encoder(edge_attr)
 
         return (x_j + edge_attr).relu() if edge_weight is None else edge_weight.view(-1, 1) * (x_j + edge_attr).relu()
+
+
+def load_mega_mol_bart(model_path, vocab_path=DEFAULT_VOCAB_PATH):
+    args = {
+        'num_layers': DEFAULT_NUM_LAYERS,
+        'hidden_size': DEFAULT_D_MODEL,
+        'num_attention_heads': DEFAULT_NUM_HEADS,
+        'max_position_embeddings': DEFAULT_MAX_SEQ_LEN,
+        'tokenizer_type': 'GPT2BPETokenizer',
+        'vocab_file': vocab_path,
+    }
+    initialize_megatron(args_defaults=args, ignore_unknown_args=True)
+    
+    args['model_path'] = model_path
+    args = ArgsContainer(**args)
+    tokenizer = _load_mega_mol_bart_tokenizer(args.vocab_file, regex=REGEX, default_chem_token_start=DEFAULT_CHEM_TOKEN_START)
+    model = _load_mega_mol_bart_model(args, tokenizer, decoder_max_seq_len=None)
+    return model, tokenizer
+
+
+def _load_mega_mol_bart_tokenizer(tokenizer_vocab_path, regex, default_chem_token_start):
+    """Load MegaMolBART Tokenizer from vocab file
+
+    Args:
+        tokenizer_vocab_path: str, path to tokenizer vocab
+
+    Returns:
+        MolEncTokenizer tokenizer object
+    """
+    print("Loading vocab from {}.".format(tokenizer_vocab_path))
+    tokenizer_vocab_path = Path(tokenizer_vocab_path)
+    tokenizer = MolEncTokenizer.from_vocab_file(
+        tokenizer_vocab_path,
+        regex,
+        default_chem_token_start)
+
+    return tokenizer
+
+
+def _load_mega_mol_bart_model(args, tokenizer, decoder_max_seq_len=None):
+    """Load saved model checkpoint
+
+    Params:
+        tokenizer: MolEncTokenizer tokenizer object
+        decoder_max_seq_len: int, maximum sequence length
+        args: Megatron initialized arguments
+
+    Returns:
+        MegaMolBART trained model
+    """
+
+    vocab_size = len(tokenizer)
+    pad_token_idx = tokenizer.vocab[tokenizer.pad_token]
+
+    if not decoder_max_seq_len:
+        decoder_max_seq_len = args.max_position_embeddings
+
+    sampler = DecodeSampler(tokenizer, decoder_max_seq_len)
+    model = MegatronBART(
+        sampler,
+        pad_token_idx,
+        vocab_size,
+        args.hidden_size,
+        args.num_layers,
+        args.num_attention_heads,
+        args.hidden_size * 4,
+        args.max_position_embeddings,
+        dropout=0.1,
+    )
+    if args.model_path is not None:
+        state_dict = torch.load(args.model_path, map_location='cpu')
+        model.load_state_dict(state_dict)
+
+    return model
 
 
 if __name__=="__main__":
