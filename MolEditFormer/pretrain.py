@@ -20,10 +20,9 @@ from torch_geometric.data import Data
 from torch_geometric.loader import DataLoader as pyg_DataLoader
 from transformers import AutoModel, AutoTokenizer
 
-from models import CLIP
-from datasets import PubChemEdit, MolPair_SingleGraph , DataHelper, MolGraphDataset
-
-from basic_utils import get_local_time, freeze_network, seed_all, Logger
+from MolEditFormer.basic_utils import get_local_time, seed_all, Logger
+from MolEditFormer.models import CLIP
+from MolEditFormer.datasets import PubChemEdit, MolPair_SingleGraph, MolGraphDataset
 
 
 class epoch_based_WarmupCosineLR(_LRScheduler):

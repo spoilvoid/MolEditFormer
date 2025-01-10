@@ -9,9 +9,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 from typing import Any, Union, List
 from transformers import AutoModel, AutoTokenizer
-from . import GNN, GNN_graphpred
-from .model_utils import cycle_index, mean_pooling, load_mega_mol_bart, ArgsContainer
-from .mega_molbart.mega_mol_bart import MegaMolBART
+
+from MolEditFormer.models.model_utils import cycle_index, mean_pooling, load_mega_mol_bart, ArgsContainer
+from MolEditFormer.models import GNN, GNN_graphpred
 
 
 class CLIP(nn.Module):

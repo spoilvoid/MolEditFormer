@@ -15,7 +15,7 @@ import torch
 from torch.utils.data import Dataset
 from torch_geometric.data import Data, InMemoryDataset
 
-from . import dataset_utils
+from MolEditFormer.datasets import dataset_utils
 
 
 class MolPair_SingleGraph(InMemoryDataset):

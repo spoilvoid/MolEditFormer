@@ -10,7 +10,7 @@ from rdkit import Chem, RDLogger
 from rdkit.Chem import AllChem, Descriptors
 from rdkit import DataStructs
 
-from models import MegaMolBART, GNN, GNN_graphpred, MLP
+from MolEditFormer.models import MLP
 
 
 lg = RDLogger.logger()

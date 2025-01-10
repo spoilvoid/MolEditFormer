@@ -13,9 +13,9 @@ import torch.nn as nn
 from torch import optim
 import torch.nn.functional as F
 
-from models import CLIP, MegaMolBART, MLP
 from molecule_edit_utils import load_space_projector, get_edit_SMILES_list, get_edit_prompt, evaluate_SMILES_list, evaluate_SMILES_success_rate
-from basic_utils import get_local_time, seed_all, default_dump
+from MolEditFormer.basic_utils import get_local_time, seed_all, default_dump
+from MolEditFormer.models import CLIP, MegaMolBART, MLP
 
 
 # molecule_repr: [batch_size, d_model_joint], text_repr: [batch_size, d_model_joint]

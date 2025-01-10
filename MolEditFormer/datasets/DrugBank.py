@@ -3,8 +3,10 @@ from itertools import chain, repeat
 import pandas as pd
 import torch
 from torch_geometric.data import InMemoryDataset, Data
-from . import dataset_utils
+
 from rdkit.Chem import AllChem
+
+from MolEditFormer.datasets import dataset_utils
 
 
 class DrugBank_retrieval_Graph(InMemoryDataset):

@@ -26,10 +26,11 @@ from torch_geometric.nn.conv.gcn_conv import gcn_norm
 from ogb.graphproppred.mol_encoder import BondEncoder
 from megatron.initialize import initialize_megatron
 
-from .mega_molbart.decoder import DecodeSampler
-from .mega_molbart.tokenizer import MolEncTokenizer
-from .mega_molbart.megatron_bart import MegatronBART
-from .mega_molbart.util import (REGEX, DEFAULT_CHEM_TOKEN_START, DEFAULT_MAX_SEQ_LEN, DEFAULT_VOCAB_PATH, DEFAULT_NUM_LAYERS, DEFAULT_D_MODEL, DEFAULT_NUM_HEADS)
+from MolEditFormer.models.mega_molbart.decoder import DecodeSampler
+from MolEditFormer.models.mega_molbart.tokenizer import MolEncTokenizer
+from MolEditFormer.models.mega_molbart.megatron_bart import MegatronBART
+from MolEditFormer.models.mega_molbart.util import (REGEX, DEFAULT_CHEM_TOKEN_START, DEFAULT_MAX_SEQ_LEN, DEFAULT_VOCAB_PATH, DEFAULT_NUM_LAYERS, DEFAULT_D_MODEL, DEFAULT_NUM_HEADS)
+
 
 def cycle_index(num, shift):
     '''

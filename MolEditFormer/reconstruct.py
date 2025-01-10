@@ -21,23 +21,94 @@ from torch_geometric.data import Data
 from torch_geometric.loader import DataLoader as pyg_DataLoader
 from transformers import AutoModel, AutoTokenizer
 
-from models import CLIP
-from datasets import PubChemEdit, MolPair_SingleGraph , DataHelper, MolGraphDataset
-
-from basic_utils import get_local_time, freeze_network, seed_all, Logger
-
-from models import MegaMolBART
+from MolEditFormer.basic_utils import seed_all, Logger
+from MolEditFormer.models import CLIP
+from MolEditFormer.datasets import PubChemEdit, MolPair_SingleGraph, MolGraphDataset
 
 
 def main(args):
-    dataset = PubChemEdit(args.data_dir, mode=args.dataset_mode, can_smiles=args.can_smiles)
-    MegaMolBART_wrapper = MegaMolBART(vocab_path=args.smiles_vocab_path, input_dir="ckpt/MegaMolBART", output_dir=None)
+    seed_all(args.seed)
+    device = torch.device("cuda:{}".format(args.gpu) if torch.cuda.is_available() else "cpu")
+    print("device:", device)
+    if args.dir_name == "":
+        model_save_dir = osp.join(args.store_dir, f"{args.data_source}_reconstruct")
+    else:
+        model_save_dir = osp.join(args.store_dir, args.dir_name)
+    if not osp.exists(model_save_dir):
+        os.makedirs(model_save_dir)
+
+    if args.molecule_type in ["2DGraph", "all"]:
+        mol_args = {
+            "molecule_type": args.molecule_type,
+            "gnn_type": args.gnn_type,
+            "num_layer": args.num_layer,
+            "gnn_emb_dim": args.gnn_emb_dim,
+            "JK": args.JK,
+            "dropout_ratio": args.dropout_ratio,
+            "graph_pooling": args.graph_pooling,
+            "model_path": args.mol_model_path,
+        }
+    if args.molecule_type in ["3DGraph", "all"]:
+        pass
+    if args.molecule_type in ["SMILES", "all"]:
+        mol_args = {
+            "molecule_type": args.molecule_type,
+            "smiles_emb_dim": args.smiles_emb_dim, 
+            "vocab_path" : args.smiles_vocab_path, 
+            "model_path": args.mol_model_path,
+        }
+
+    model = CLIP(
+        mol_branch=args.mol_branch,
+        text_branch=args.text_branch,
+        mode=args.model_mode,
+        device=device,
+        mol_args=mol_args,
+        text_args=None,
+        CL_args=None,
+    ).to(device)
+    model.eval()
+
+    if args.data_source == "PubChemEdit":
+        test_set = PubChemEdit(args.data_dir, mode=args.dataset_mode, can_smiles=args.can_smiles)
+    elif args.data_source == "MolPair":
+        test_set = MolPair_SingleGraph(args.data_dir)
+    test_loader = pyg_DataLoader(test_set, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
+
+    original_smiles_list, result_smiles_list = [], []
+    for i_batch, sample_batched in tqdm(enumerate(test_loader), disable=False, total=len(test_loader)):
+        # load data from dataloader
+        if args.molecule_type not in ["2DGraph", "3DGraph", "SMILES", "all"]:
+            raise ValueError("Invalid molecule type")
+        
+        if args.molecule_type == "2DGraph":
+            molecule_batched = sample_batched[2].to(device)
+        elif args.molecule_type == "3DGraph":
+            pass
+        elif args.molecule_type == "SMILES":
+            molecule_batched = sample_batched[0]
+        elif args.molecule_type == "all":
+            pass
+        original_smiles_list.extend(molecule_batched)
+        token_ids, pad_mask = model.prepare_smiles_tokens(molecule_batched)
+        batch_input = {'encoder_input': token_ids, 'encoder_pad_mask': pad_mask}
+        output_mol_strs, _ = model.sample_molecules(batch_input, sampling_alg=args.sampling_alg)
+        result_smiles_list.extend(output_mol_strs)
     
-    latent_code_init, pad_mask_init = MegaMolBART_wrapper.smileslist2embedding([dataset[0][0]])  # [pad, B, d], 
-    # print(pad_mask_init)
-    
-    regenerated_mol = MegaMolBART_wrapper.inverse_transform([latent_code_init], pad_mask_init.bool().cuda(), k=1, sanitize=True)[0]
-    print(dataset[0][0], regenerated_mol)
+    df = pd.DataFrame({
+        'original_smiles': original_smiles_list,
+        'result_smiles': result_smiles_list
+    })
+    df.to_csv(osp.join(model_save_dir, 'smiles_results.csv'), index=False)
+
+    # Calculate reconstruction accuracy
+    accurate_num = 0
+    for original, result in zip(original_smiles_list, result_smiles_list):
+        if original == result:
+            accurate_num += 1
+    accuracy = accurate_num / len(original_smiles_list)
+    print(f"Reconstruction accuracy: {accuracy:.2%}")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

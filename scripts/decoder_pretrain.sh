@@ -1,0 +1,16 @@
+python3 -m MolEditFormer.pretrain \
+    --model_mode pretrain \
+    --molecule_type SMILES \
+    --text_tokenizer_dir ckpt/SciBERT \
+    --mol_model_path ckpt/MegaMolBART/model_weight.pth \
+    --data_source PubChemEdit \
+    --dataset_mode main \
+    --data_dir data/PubChemEdit/version_1 \
+    --batch_size 32 \
+    --dir_name PubChemEdit-SMILE-Decoder-Jan-08-2025 \
+    --epoch_num 5 \
+    --alpha 1.0 \
+    --text_lr 2e-5 \
+    --graph_lr 2e-5 \
+    --seed 42 \
+    --gpu 0
