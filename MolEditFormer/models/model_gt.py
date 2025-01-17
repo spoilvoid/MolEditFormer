@@ -6,12 +6,60 @@ import os.path as osp
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.init as init
 import torch.nn.functional as F
 from typing import Any, Union, List
 from transformers import AutoModel, AutoTokenizer
 
-from MolEditFormer.models.model_utils import cycle_index, mean_pooling, load_mega_mol_bart, ArgsContainer
+from MolEditFormer.models.model_utils import cycle_index, pad_tensor, mean_pooling, load_mega_mol_bart, ArgsContainer
 from MolEditFormer.models import GNN, GNN_graphpred
+
+
+class MolTextFuser(nn.Module):
+    def __init__(
+        self, 
+        mol_dim: int, 
+        text_dim: int,
+        num_layers: int,
+        num_heads: int,
+        dropout: float = 0.0,
+    ):
+        """
+        Args:
+            mol_dim: Dimension of molecule embedding
+            text_dim: Dimension of text embedding
+            num_layers: Number of stacked cross-attention layers and LayerNorm
+            num_heads: Number of attention heads
+            dropout: Dropout probability applied within MultiheadAttention
+        """
+        super(MolTextFuser, self).__init__()
+        self.mol_dim = mol_dim
+        self.text_dim = text_dim
+        self.num_layers = num_layers
+        self.num_heads = num_heads
+        self.dropout = dropout
+
+        self.text2mol_adapter = nn.Linear(text_dim, mol_dim)
+        self.cross_attn_layers = nn.ModuleList([nn.MultiheadAttention(embed_dim=mol_dim, num_heads=num_heads, dropout=dropout) for _ in range(num_layers)])
+        self.norm_layers = nn.ModuleList([nn.LayerNorm(mol_dim) for _ in range(num_layers)])
+
+    def forward(self, mol_embedding, text_embedding, text_mask):
+        """
+        Args:
+            mol_embedding: [mol_max_seq_len, batch_size, mol_dim]
+            text_embedding: [text_max_seq_len, batch_size, text_dim]
+            text_mask: [batch_size, text_max_seq_len]
+
+        Returns:
+            mol_embedding: [mol_max_seq_len, batch_size, mol_dim]
+        """
+        # adapted_text_embedding: [text_max_seq_len, batch_size, mol_dim]
+        adapted_text_embedding = self.text2mol_adapter(text_embedding)
+        for i in range(self.num_layers):
+            out, _ = self.cross_attn_layers[i](query=mol_embedding, key=adapted_text_embedding, value=adapted_text_embedding, key_padding_mask=text_mask)
+            mol_embedding = self.norm_layers[i](mol_embedding + out)
+
+        return mol_embedding
 
 
 class CLIP(nn.Module):
@@ -21,6 +69,7 @@ class CLIP(nn.Module):
     SMILES_MOL_ARGS_RANGE = ["molecule_type", "smiles_emb_dim", "vocab_path", "model_path"]
     TEXT_ARGS_RANGE = ["text_emb_dim", "max_seq_len", "tokenizer_dir", "model_path"]
     CL_ARGS_RANGE = ["CL_emb_dim", "CL_loss", "CL_neg_samples", "T", "normalize", "mol2latent_path", "text2latent_path"]
+    FUSE_ARGS_RANGE = ["num_layers", "num_heads", "dropout", "model_path"]
 
     def __init__(
         self, 
@@ -31,6 +80,7 @@ class CLIP(nn.Module):
         mol_args: dict = None,
         text_args: dict = None,
         CL_args: dict = None,
+        fuse_args: dict = None,
     ):
         super().__init__()
 
@@ -41,6 +91,7 @@ class CLIP(nn.Module):
         self.mode = mode
         self.device = device
         self.CL_args = ArgsContainer(**(CL_args or {}))
+        self.fuse_args = ArgsContainer(**(fuse_args or {}))
 
         # check args validity
         self._args_check()
@@ -89,6 +140,14 @@ class CLIP(nn.Module):
             if self.CL_args.text2latent_path is not None:
                 state_dict = torch.load(self.CL_args.text2latent_path, map_location='cpu')
                 self.text2latent.load_state_dict(state_dict)
+        elif self.mode == "finetune":
+            self.modality_fuser = MolTextFuser(
+                mol_dim=self.molecule_dim, text_dim=self.text_dim, 
+                num_layers=self.fuse_args.num_layers, num_heads=self.fuse_args.num_heads,
+                dropout=self.fuse_args.dropout)
+            if self.fuse_args.model_path is not None:
+                state_dict = torch.load(self.fuse_args.model_path, map_location='cpu')
+                self.modality_fuser.load_state_dict(state_dict)
 
         # change model's device
         self.to(self.device)
@@ -122,7 +181,31 @@ class CLIP(nn.Module):
                 raise ValueError(f"CL_args should at least contain {self.CL_ARGS_RANGE}")
             
         elif self.mode == 'finetune':
-            pass
+            if not self.mol_branch:
+                raise ValueError("molecule branch should be enabled")
+            elif self.mol_args is None:
+                raise ValueError("mol_args should be provided")
+            elif "molecule_type" not in self.mol_args.keys() or self.mol_args.molecule_type not in self.MOLECULE_TYPE_RANGE:
+                raise ValueError("mol_args should contain valid molecule_type")
+            elif self.mol_args.molecule_type in ["2DGraph", "all"] and any(arg_name not in self.mol_args.keys() for arg_name in self.GRAPH2D_MOL_ARGS_RANGE):
+                raise ValueError(f"2DGraph mol_args should at least contain {self.GRAPH2D_MOL_ARGS_RANGE}")
+            elif self.mol_args.molecule_type in ["3DGraph", "all"] and any(arg_name not in self.mol_args.keys() for arg_name in self.GRAPH3D_MOL_ARGS_RANGE):
+                raise ValueError(f"3DGraph mol_args should at least contain {self.GRAPH3D_MOL_ARGS_RANGE}")
+            elif self.mol_args.molecule_type in ["SMILES", "all"] and any(arg_name not in self.mol_args.keys() for arg_name in self.SMILES_MOL_ARGS_RANGE):
+                raise ValueError(f"SMILES mol_args should at least contain {self.SMILES_MOL_ARGS_RANGE}")
+            
+            if not self.text_branch:
+                raise ValueError("text branch should be enabled")
+            elif self.text_args is None:
+                raise ValueError("text_args should be provided")
+            elif any(arg_name not in self.text_args.keys() for arg_name in self.TEXT_ARGS_RANGE):
+                raise ValueError(f"text_args should at least contain {self.TEXT_ARGS_RANGE}")
+            
+            if self.fuse_args is None:
+                raise ValueError("fuse_args should be provided")
+            elif any(arg_name not in self.fuse_args.keys() for arg_name in self.FUSE_ARGS_RANGE):
+                raise ValueError(f"fuse_args should at least contain {self.FUSE_ARGS_RANGE}")
+            
         elif self.mode == 'inference':
             pass
 
@@ -139,6 +222,9 @@ class CLIP(nn.Module):
         smiles_input = self.molecule_tokenizer.tokenize(batch_smiles, pad=True)
         token_ids = torch.tensor(self.molecule_tokenizer.convert_tokens_to_ids(smiles_input['original_tokens'])).long().to(self.device).T
         pad_mask = torch.tensor(smiles_input['masked_pad_masks']).bool().to(self.device).T
+
+        token_ids = pad_tensor(token_ids, dim=0, pad_size=self.molecule_model.sampler.max_seq_len, pad_value=self.molecule_tokenizer.vocab[self.molecule_tokenizer.pad_token])
+        pad_mask = pad_tensor(pad_mask, dim=0, pad_size=self.molecule_model.sampler.max_seq_len, pad_value=True)
         token_ids = token_ids[:self.molecule_model.sampler.max_seq_len]
         pad_mask = pad_mask[:self.molecule_model.sampler.max_seq_len]
         return token_ids, pad_mask
@@ -167,48 +253,75 @@ class CLIP(nn.Module):
         decode_output = self.molecule_model.decode(decode_input) # logits
         return decode_output
 
-    def forward(self, batch_molecule, batch_text):
+    def forward(self, batch_input_molecule, batch_input_text, batch_output_molecule=None, batch_output_text=None):
         if not (self.mol_branch and self.text_branch):
-            raise ValueError("text branch and molecule branch should both be enabled")
-        elif self.mol_branch and not self.text_branch:
-            raise ValueError("text branch should be enabled")
-        elif not self.mol_branch and self.text_branch:
-            raise ValueError("molecule branch should be enabled")
-        # text_token_ids, text_mask: [batch_size, text_max_seq_len]
-        text_token_ids, text_mask = self.prepare_text_tokens(batch_text)
+            missing = (["molecule"] if not self.mol_branch else []) + (["text"] if not self.text_branch else [])
+            raise ValueError(f"{' and '.join(missing)} branch{'es' if len(missing) > 1 else ''} should be enabled")
+        elif self.mode == "finetune" and batch_output_molecule is None:
+            raise ValueError("batch_output_molecule should be provided in finetune mode")
+        
+        # input_text_token_ids, input_text_mask: [batch_size, text_max_seq_len]
+        input_text_token_ids, input_text_mask = self.prepare_text_tokens(batch_input_text)
         # text_embedding: [batch_size, text_max_seq_len, text_d_model]
         # text_pooled_embedding: [batch_size, text_d_model]
-        text_embedding, text_pooled_embedding = self.encode_text_from_pretrain_model(text_token_ids, text_mask)  
-        # text_repr: [batch_size, text_d_model]
-        text_repr = mean_pooling(text_embedding.transpose(0, 1), text_mask.transpose(0, 1))
-        # text_latent: [batch_size, SSL_emb_dim]
-        text_latent = self.text2latent(text_repr)
+        text_embedding, text_pooled_embedding = self.encode_text_from_pretrain_model(input_text_token_ids, input_text_mask)
 
         if self.mol_args.molecule_type in ["SMILES", "all"]:
-            # molecule_token_ids, molecule_mask: [mol_max_seq_len, batch_size]
-            molecule_token_ids, molecule_mask = self.prepare_smiles_tokens(batch_molecule)
+            # input_molecule_token_ids, molecule_mask: [mol_max_seq_len, batch_size]
+            input_molecule_token_ids, input_molecule_mask = self.prepare_smiles_tokens(batch_input_molecule)
             # molecule_embedding: [mol_max_seq_len, batch_size, mol_d_model]
-            molecule_embedding = self.encode_smiles(molecule_token_ids, molecule_mask)
-            # molecule_repr: [batch_size, mol_d_model]
-            molecule_repr = mean_pooling(molecule_embedding, ~molecule_mask)
-            # decode_logits: [mol_max_seq_len, batch_size, vocab_size]
-            decode_logits = self.decode_smiles(molecule_token_ids, molecule_mask, molecule_embedding)
+            molecule_embedding = self.encode_smiles(input_molecule_token_ids, input_molecule_mask)
         elif self.mol_args.molecule_type in ["2DGraph", "all"]:
-            molecule_repr = self.encode_graph(batch_molecule)
-        # molecule_latent: [batch_size, SSL_emb_dim]
-        molecule_latent = self.mol2latent(molecule_repr)
+            # molecule_repr = self.encode_graph(batch_molecule)
+            pass
+        elif self.mol_args.molecule_type in ["3DGraph", "all"]:
+            pass
+        
+        if self.mode == "pretrain":
+            output_molecule_token_ids, output_molecule_mask = input_molecule_token_ids, input_molecule_mask
+            # text_repr: [batch_size, text_d_model]
+            text_repr = mean_pooling(text_embedding.transpose(0, 1), input_text_mask.transpose(0, 1))
+            # text_latent: [batch_size, SSL_emb_dim]
+            text_latent = self.text2latent(text_repr)
+            # molecule_repr: [batch_size, mol_d_model]
+            molecule_repr = mean_pooling(molecule_embedding, ~input_molecule_mask)
+            # molecule_latent: [batch_size, SSL_emb_dim]
+            molecule_latent = self.mol2latent(molecule_repr)
+            if self.mol_args.molecule_type in ["SMILES", "all"]:
+                # decode_logits: [mol_max_seq_len, batch_size, vocab_size]
+                decode_logits = self.decode_smiles(input_molecule_token_ids, input_molecule_mask, molecule_embedding)
+            elif self.mol_args.molecule_type in ["2DGraph", "all"]:
+                # molecule_repr = self.encode_graph(batch_molecule)
+                pass
+            elif self.mol_args.molecule_type in ["3DGraph", "all"]:
+                pass
+            cl_loss, mask_loss = self._calc_pretrain_loss(molecule_latent, text_latent, output_molecule_token_ids, output_molecule_mask, decode_logits)
 
-        cl_loss, mask_loss = self._calc_loss(molecule_latent, text_latent, molecule_token_ids, molecule_mask, decode_logits)
+        elif self.mode == "finetune":
+            fused_molecule_embedding = self.modality_fuser(molecule_embedding, text_embedding.transpose(0, 1), input_text_mask)
+            if self.mol_args.molecule_type in ["SMILES", "all"]:
+                # output_molecule_token_ids, output_molecule_mask: [mol_max_seq_len, batch_size]
+                output_molecule_token_ids, output_molecule_mask = self.prepare_smiles_tokens(batch_output_molecule)
+                # decode_logits: [mol_max_seq_len, batch_size, vocab_size]
+                decode_logits = self.decode_smiles(output_molecule_token_ids, output_molecule_mask, fused_molecule_embedding)
+            elif self.mol_args.molecule_type in ["2DGraph", "all"]:
+                # molecule_repr = self.encode_graph(batch_molecule)
+                pass
+            elif self.mol_args.molecule_type in ["3DGraph", "all"]:
+                pass
+            mask_loss = self._calc_finetune_loss(output_molecule_token_ids, output_molecule_mask, decode_logits)
+            cl_loss = None
         return cl_loss, mask_loss
 
-    def _calc_loss(self, molecule_latent, text_latent, smiles_token_ids=None, smiles_mask=None, decoder_output=None):
+    def _calc_pretrain_loss(self, molecule_latent, text_latent, smiles_token_ids, smiles_mask, decoder_output):
         cl_loss = (self._calc_cl_loss(molecule_latent, text_latent) + self._calc_cl_loss(text_latent, molecule_latent)) / 2
-        if smiles_token_ids is not None and smiles_mask is not None and decoder_output is not None:
-            mask_loss = self._calc_mask_loss(smiles_token_ids, smiles_mask, decoder_output)
-            return cl_loss, mask_loss
-        else:
-            return cl_loss, None
-    
+        mask_loss = self._calc_mask_loss(smiles_token_ids, smiles_mask, decoder_output)
+        return cl_loss, mask_loss
+
+    def _calc_finetune_loss(self, smiles_token_ids, smiles_mask, decoder_output):
+        mask_loss = self._calc_mask_loss(smiles_token_ids, smiles_mask, decoder_output)
+        return mask_loss
+
     def _calc_cl_loss(self, latent_1, latent_2):
         '''
         latent_1 [batch_size, SSL_emb_dim]: molecular features or text features 

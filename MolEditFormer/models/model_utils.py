@@ -59,6 +59,27 @@ def pad_array_1d(array_1d, size, value=0):
     return np.pad(array_1d, pad_width=(0, pad_length), mode='constant', constant_values=value)
 
 
+def pad_tensor(input_tensor: torch.Tensor, pad_size: int, pad_value: float = 0.0, dim: int = 0):
+    """Pad input tensor to the target size
+
+    Args:
+        input_tensor (torch.Tensor): Input tensor to be padded
+        pad_size (int): Target size of the tensor
+        pad_value (float): Value to pad the tensor with
+        dim (int): Dimension to pad the tensor
+
+    Returns:
+        torch.Tensor: Padded tensor
+    """
+    if input_tensor.size(dim) < pad_size:
+        pad_shape = list(input_tensor.shape)
+        pad_shape[dim] = pad_size - input_tensor.size(dim)
+        pad_tensor = torch.full(pad_shape, pad_value, dtype=input_tensor.dtype, device=input_tensor.device)
+        return torch.cat([input_tensor, pad_tensor], dim=dim)
+    else:
+        return input_tensor
+
+
 def mean_pooling(token_embeddings, attention_mask):
     """Mean pooling of token embeddings.
 

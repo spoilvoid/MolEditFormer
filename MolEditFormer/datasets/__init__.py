@@ -1,7 +1,8 @@
 from .PubChemEdit import PubChemEdit
-from .MolPair import MolPair_SingleGraph, MolPair_PairGraph
+from .PubChemEdit_ZINC250k import PubChemEdit_ZINC250k
+from .MolPair import MolPair_SingleGraph, MolPair_PairGraph, MolPair_PairSmiles
 from .ZINC250k import ZINC250K_Graph
 from .DrugBank import DrugBank_retrieval_Graph, DrugBank_ATC_Graph
 from .MolGraph import MolGraphDataset
 
-__all__ = ["PubChemEdit", "MolPair_SingleGraph", "ZINC250K_Graph", "DrugBank_retrieval_Graph", "DrugBank_ATC_Graph", "MolGraphDataset", "MolPair_PairGraph"]
+__all__ = ["PubChemEdit", "PubChemEdit_ZINC250k", "MolPair_SingleGraph", "MolPair_PairSmiles", "ZINC250K_Graph", "DrugBank_retrieval_Graph", "DrugBank_ATC_Graph", "MolGraphDataset", "MolPair_PairGraph"]

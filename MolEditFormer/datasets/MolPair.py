@@ -1,6 +1,8 @@
 import os
 import gzip
 import json
+import random
+import re
 import pandas as pd
 from itertools import repeat
 from tqdm import tqdm
@@ -16,6 +18,9 @@ from torch.utils.data import Dataset
 from torch_geometric.data import Data, InMemoryDataset
 
 from MolEditFormer.datasets import dataset_utils
+
+
+DESCRIPTION_MODE = ["full", "main", "expand"]
 
 
 class MolPair_SingleGraph(InMemoryDataset):
@@ -137,4 +142,87 @@ class MolPair_PairGraph(InMemoryDataset):
 
     def __len__(self):
         return len(self.SMILES_list)
-    
+
+
+class MolPair_PairSmiles(Dataset):
+    def __init__(self, root, mode="main", max_num_pairs_per_task=40000):
+        self.root = root
+        self.mode = mode
+        self.max_num_pairs_per_task = max_num_pairs_per_task
+
+        self.PubchemEdit_filepath = os.path.join(self.root, "raw", "description", "PubChemEdit.json")
+        self.additional_ZINC250k_filepath = os.path.join(self.root, "raw", "description", "additional_ZINC250k.csv")
+        self.template_dir = os.path.join(self.root, "raw", "template")
+        self.pair_dir = os.path.join(self.root, "raw", "pair")
+
+        self.description_filepath = os.path.join(self.root, self.mode, "processed_description.csv")
+        self.pair_filepath = os.path.join(self.root, self.mode, "processed_pair.csv")
+        if not os.path.exists(os.path.join(self.root, self.mode)):
+            os.makedirs(os.path.join(self.root, self.mode))
+        
+        if os.path.exists(self.description_filepath) and os.path.exists(self.pair_filepath):
+            pair_df = pd.read_csv(self.pair_filepath)
+            description_df = pd.read_csv(self.description_filepath)
+            self.input_smiles_list = pair_df["smiles1"].tolist()
+            self.output_smiles_list = pair_df["smiles2"].tolist()
+            self.description_list = description_df["description"].tolist()
+        else:
+            self.process()
+
+    def process(self):
+        self.input_smiles_list, self.output_smiles_list, self.description_list = [], [], []
+        
+        description_dict = {}
+        print("Processing PubChemEdit")
+        with open(self.PubchemEdit_filepath) as file:
+            PubChemEdit_data = json.load(file)
+        file.close()
+        for item in tqdm(PubChemEdit_data):
+            if self.mode == "full":
+                raw_descriptions = [desc for label, desc in item["Description"].items() if desc != "" and label not in ["Pharmacology/Biochemistry", "Others"]]
+            elif self.mode == "main":
+                raw_descriptions = [desc for label, desc in item["Description"].items() if desc != "" and label in ["MolecularStructure/Classification", "FunctionalGroups", "PhysicalProperty/ChemicalProperty", "CalculatedProperties"]]
+            else:
+                raise ValueError(f"Invalid mode: {self.mode}")
+            description_dict[item["RDKit_IsoSmiles"]] = " ".join(raw_descriptions)
+        print("Processing additional ZINC250k")
+        additional_ZINC250k_df = pd.read_csv(self.additional_ZINC250k_filepath)
+        for idx, row in tqdm(additional_ZINC250k_df.iterrows(), total=len(additional_ZINC250k_df)):
+            description_dict[row["smiles"]] = row["description"]
+        
+        print("Processing pairs")
+        for pair_file in tqdm(os.listdir(self.pair_dir)):
+            match = re.search(r'task_(\d+)\.csv', pair_file)
+            if match:
+                task_id = match.group(1)
+            else:
+                raise ValueError(f"Invalid pair file: {pair_file}")
+            
+            pair_df = pd.read_csv(os.path.join(self.pair_dir, pair_file))
+            with open(os.path.join(self.template_dir, f"task_{task_id}.txt"), 'r', encoding='utf-8') as file:
+                lines = file.readlines()
+            template_list = [line.strip() for line in lines]
+
+            if len(pair_df) > self.max_num_pairs_per_task:
+                pair_df = pair_df.sample(n=self.max_num_pairs_per_task)
+            for idx, row in pair_df.iterrows():
+                template = random.choice(template_list)
+                task_description = re.sub(r'\${input}', 'the above molecule', template)
+                self.description_list.append(description_dict[row["smiles1"]] + " " + task_description)
+                self.input_smiles_list.append(row["smiles1"])
+                self.output_smiles_list.append(row["smiles2"])
+
+        pair_df = pd.DataFrame({"smiles1": self.input_smiles_list, "smiles2": self.output_smiles_list})
+        pair_df.to_csv(self.pair_filepath, index=None)
+
+        description_df = pd.DataFrame({"smiles": self.input_smiles_list, "description": self.description_list})
+        description_df.to_csv(self.description_filepath, index=None)
+
+    def __getitem__(self, idx):
+        input_smiles = self.input_smiles_list[idx]
+        output_smiles = self.output_smiles_list[idx]
+        description = self.description_list[idx]
+        return input_smiles, output_smiles, description
+
+    def __len__(self):
+        return len(self.input_smiles_list)
