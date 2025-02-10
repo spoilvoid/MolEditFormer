@@ -6,6 +6,7 @@ import time
 import argparse
 import numpy as np
 import pandas as pd
+import json
 from tqdm import tqdm
 from sklearn import preprocessing
 
@@ -20,16 +21,21 @@ from torch.utils.tensorboard import SummaryWriter
 from transformers import AutoModel, AutoTokenizer
 
 from MolEditFormer.basic_utils import get_local_time, seed_all, Logger
+from MolEditFormer.molecule_edit_utils import evaluate_molecular_edit_result
 from MolEditFormer.models import CLIP
 from MolEditFormer.datasets import MolPair_PairSmiles_ZeroShot_Test
-from molecule_edit_utils import evaluate_molecular_edit_result
 
 
 def main(args):
     seed_all(args.seed)
     device = torch.device("cuda:{}".format(args.gpu) if torch.cuda.is_available() else "cpu")
     print("device:", device)
-    result_save_dir = osp.join(args.store_dir, f"{args.data_source}_{args.molecule_type}")
+    if args.dir_name == "":
+        result_save_dir = osp.join(args.store_dir, str(get_local_time()))
+    else:
+        result_save_dir = osp.join(args.store_dir, args.dir_name)
+    if not osp.exists(result_save_dir):
+        os.makedirs(result_save_dir)
 
     fuse_args = {
         "num_layers": args.num_layers,
@@ -61,7 +67,7 @@ def main(args):
     ).to(device)
     model.eval()
 
-    test_set = MolPair_PairSmiles_ZeroShot_Test(args.data_dir, task_id=args.task_id)
+    test_set = MolPair_PairSmiles_ZeroShot_Test(args.data_dir, task_id=args.task_id, mode=args.dataset_mode)
     test_loader = DataLoader(test_set, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
 
     original_smiles_list, result_smiles_list = [], []
@@ -74,26 +80,35 @@ def main(args):
         original_smiles_list.extend(input_molecule_batched)
         result_smiles_list.extend(edited_molecule_batched)
 
-    result_list, reason_list = [], []
+    result_dict = {}
+    count = 0
+    
+    for input_smi in list(set(original_smiles_list)):
+        result_dict[input_smi] = {"invalid":[], "unsatisfied":[], "successful":[]}
     for input_smi, output_smi in zip(original_smiles_list, result_smiles_list):
         result, reason = evaluate_molecular_edit_result(input_smi, output_smi, task_id=args.task_id)
-        result_list.append(result)
-        reason_list.append(reason)
+        if result:
+            result_dict[input_smi]["successful"].append(output_smi)
+            count += 1
+        elif "invalid" in reason:
+            result_dict[input_smi]["invalid"].append(output_smi)
+        else:
+            result_dict[input_smi]["unsatisfied"].append(output_smi)
+    
+    success_rate = count / len(list(set(original_smiles_list)))
+    result_dict["success_rate"] = success_rate
+    print(f"Success rate: {success_rate * 100:.2f}%")
 
-    df = pd.DataFrame({
-        'original_smiles': original_smiles_list,
-        'result_smiles': result_smiles_list,
-        'result': result_list,
-        'reason': reason_list,
-    })
-    df.to_csv(osp.join(result_save_dir, f"task_{args.task_id}_results.csv"), index=False)
+    with open(osp.join(result_save_dir, f"task_{args.task_id}_results.json"), 'w') as json_file:
+        json.dump(result_dict, json_file, indent=4)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     # dataset config
     parser.add_argument("--data_dir", type=str, default="data/MolPair/mol_pair")
-    parser.add_argument("--task_id", type=str, default=101, choices=list(range(101, 109))+list(range(201, 207)))
+    parser.add_argument("--dataset_mode", type=str, default="random", choices=["random", "iterative"])
+    parser.add_argument("--task_id", type=int, default=101, choices=list(range(101, 109))+list(range(201, 207)))
     # dataloader config
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--num_workers", type=int, default=8)
@@ -124,10 +139,11 @@ if __name__ == "__main__":
     parser.add_argument('--fuser_path', type=str, default=None)
     # save config
     parser.add_argument("--store_dir", type=str, default="ckpt/MolEditFormer/inference/edit")
+    parser.add_argument("--dir_name", type=str, default="")
     # fuser config
-    parser.add_argument("--num_layers", type=int, default=8)
+    parser.add_argument("--num_layers", type=int, default=4)
     parser.add_argument("--num_heads", type=int, default=8)
-    parser.add_argument("--dropout", type=float, default=0.0)
+    parser.add_argument("--dropout", type=float, default=0.1)
 
     args = parser.parse_args()
     args.molecule_type = "SMILES"

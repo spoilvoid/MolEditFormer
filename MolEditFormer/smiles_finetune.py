@@ -184,7 +184,7 @@ if __name__ == "__main__":
     # dataset config
     parser.add_argument("--data_dir", type=str, default="data/MolPair/mol_pair")
     parser.add_argument("--dataset_mode", type=str, default="main", choices=["full", "main", "expand"])
-    parser.add_argument("--max_num_pairs_per_task", type=int, default=40000)
+    parser.add_argument("--max_num_pairs_per_task", type=int, default=25000)
     # dataloader config
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--num_workers", type=int, default=8)
@@ -198,7 +198,7 @@ if __name__ == "__main__":
     parser.add_argument("--warmup_batch", type=int, default=5000, help="batch start to warmup")
     parser.add_argument("--epoch_num", type=int, default=32, help="epoch number")
     parser.add_argument("--text_lr", type=float, default=2e-5)
-    parser.add_argument("--fuser_lr", type=float, default=2e-5)
+    parser.add_argument("--fuser_lr", type=float, default=1e-4)
     parser.add_argument("--weight_decay", type=float, default=0)
     # model config
     parser.set_defaults(repr_frozen=False)
@@ -226,9 +226,9 @@ if __name__ == "__main__":
     parser.add_argument("--save_freq", type=int, default=4000)
     parser.add_argument("--loss_threshold", type=float, default=sys.maxsize)
     # fuser config
-    parser.add_argument("--num_layers", type=int, default=8)
+    parser.add_argument("--num_layers", type=int, default=4)
     parser.add_argument("--num_heads", type=int, default=8)
-    parser.add_argument("--dropout", type=float, default=0.0)
+    parser.add_argument("--dropout", type=float, default=0.1)
 
     args = parser.parse_args()
     args.molecule_type = "SMILES"

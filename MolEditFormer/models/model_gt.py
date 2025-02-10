@@ -142,7 +142,7 @@ class CLIP(nn.Module):
             if self.CL_args.text2latent_path is not None:
                 state_dict = torch.load(self.CL_args.text2latent_path, map_location='cpu')
                 self.text2latent.load_state_dict(state_dict)
-        elif self.mode == "finetune":
+        elif self.mode in ["finetune", "edit"]:
             self.modality_fuser = MolTextFuser(
                 mol_dim=self.molecule_dim, text_dim=self.text_dim, 
                 num_layers=self.fuse_args.num_layers, num_heads=self.fuse_args.num_heads,

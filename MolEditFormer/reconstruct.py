@@ -30,7 +30,10 @@ def main(args):
     seed_all(args.seed)
     device = torch.device("cuda:{}".format(args.gpu) if torch.cuda.is_available() else "cpu")
     print("device:", device)
-    result_save_dir = osp.join(args.store_dir, f"{args.data_source}_reconstruct")
+    if args.dir_name == "":
+        result_save_dir = osp.join(args.store_dir, str(get_local_time()))
+    else:
+        result_save_dir = osp.join(args.store_dir, args.dir_name)
     if not osp.exists(result_save_dir):
         os.makedirs(result_save_dir)
 
@@ -155,6 +158,7 @@ if __name__ == "__main__":
     parser.add_argument('--mol_projector_path', type=str, default=None)
     # save config
     parser.add_argument("--store_dir", type=str, default="ckpt/MolAlign/inference/reconstruct")
+    parser.add_argument("--dir_name", type=str, default="")
 
     args = parser.parse_args()
 

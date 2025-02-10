@@ -21,6 +21,7 @@ from MolEditFormer.datasets import dataset_utils
 
 
 DESCRIPTION_MODE = ["full", "main", "expand"]
+RETRIEVAL_MODE = ["random", "iterative"]
 
 
 class MolPair_SingleGraph(InMemoryDataset):
@@ -147,6 +148,8 @@ class MolPair_PairGraph(InMemoryDataset):
 class MolPair_PairSmiles(Dataset):
     def __init__(self, root, mode="main", max_num_pairs_per_task=40000):
         self.root = root
+        if mode not in DESCRIPTION_MODE:
+            raise ValueError(f"Invalid mode: {mode}, choose from {DESCRIPTION_MODE}")
         self.mode = mode
         self.max_num_pairs_per_task = max_num_pairs_per_task
 
@@ -229,15 +232,18 @@ class MolPair_PairSmiles(Dataset):
 
 
 class MolPair_PairSmiles_ZeroShot_Test(Dataset):
-    def __init__(self, root, task_id):
+    def __init__(self, root, task_id, mode="random"):
         self.root = root
+        if mode not in RETRIEVAL_MODE:
+            raise ValueError(f"Invalid mode: {mode}, choose from {RETRIEVAL_MODE}")
+        self.mode = mode
         self.task_id = task_id
-        self.raw_filepath = os.path.join(self.root, "zero_shot", f"raw_data.csv")
-        self.template_path = os.path.join(self.root, "raw", "template", f"task_{task_id}.csv")
+        self.raw_filepath = os.path.join(self.root, "raw", f"raw_data.csv")
+        self.template_path = os.path.join(self.root, "raw", "template", f"task_{task_id}.txt")
 
-        self.processed_filepath = os.path.join(self.root, "zero_shot", f"task_{task_id}_input.csv")
-        if not os.path.exists(os.path.join(self.root, "zero_shot")):
-            os.makedirs(os.path.join(self.root, "zero_shot"))
+        self.processed_filepath = os.path.join(self.root, self.mode, f"task_{task_id}_input.csv")
+        if not os.path.exists(os.path.join(self.root, self.mode)):
+            os.makedirs(os.path.join(self.root, self.mode))
         
         if os.path.exists(self.processed_filepath):
             processed_df = pd.read_csv(self.processed_filepath)
@@ -257,11 +263,20 @@ class MolPair_PairSmiles_ZeroShot_Test(Dataset):
             lines = file.readlines()
         template_list = [line.strip() for line in lines]
 
-        for idx, row in raw_df.iterrows():
-            template = random.choice(template_list)
-            task_description = re.sub(r'\${input}', 'the above molecule', template)
-            self.description_list.append(row["description"] + " " + task_description)
-            self.input_smiles_list.append(row["smiles"])
+        if self.mode == "random":
+            for idx, row in tqdm(raw_df.iterrows()):
+                template = random.choice(template_list)
+                task_description = re.sub(r'\${input}', 'the above molecule', template)
+                self.description_list.append(row["description"] + " " + task_description)
+                self.input_smiles_list.append(row["smiles"])
+        elif self.mode == "iterative":
+            for idx, row in tqdm(raw_df.iterrows()):
+                for template in template_list:
+                    task_description = re.sub(r'\${input}', 'the above molecule', template)
+                    self.description_list.append(row["description"] + " " + task_description)
+                    self.input_smiles_list.append(row["smiles"])
+        else:
+            raise ValueError(f"Invalid mode: {self.mode}")
 
         description_df = pd.DataFrame({"smiles": self.input_smiles_list, "description": self.description_list})
         description_df.to_csv(self.processed_filepath, index=None)
