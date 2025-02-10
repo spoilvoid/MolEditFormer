@@ -184,7 +184,7 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--num_workers", type=int, default=8)
     # train config
-    parser.add_argument("--model_mode", type=str, default="pretrain", choices=["pretrain", "finetune", "inference"])
+    parser.add_argument("--model_mode", type=str, default="pretrain", choices=["pretrain", "finetune", "reconstruct", "edit"])
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--gpu", type=int, default=1)
     parser.add_argument("--start_epoch", type=int, default=0)

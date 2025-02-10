@@ -226,3 +226,50 @@ class MolPair_PairSmiles(Dataset):
 
     def __len__(self):
         return len(self.input_smiles_list)
+
+
+class MolPair_PairSmiles_ZeroShot_Test(Dataset):
+    def __init__(self, root, task_id):
+        self.root = root
+        self.task_id = task_id
+        self.raw_filepath = os.path.join(self.root, "zero_shot", f"raw_data.csv")
+        self.template_path = os.path.join(self.root, "raw", "template", f"task_{task_id}.csv")
+
+        self.processed_filepath = os.path.join(self.root, "zero_shot", f"task_{task_id}_input.csv")
+        if not os.path.exists(os.path.join(self.root, "zero_shot")):
+            os.makedirs(os.path.join(self.root, "zero_shot"))
+        
+        if os.path.exists(self.processed_filepath):
+            processed_df = pd.read_csv(self.processed_filepath)
+            self.input_smiles_list = processed_df["smiles"].tolist()
+            self.description_list = processed_df["description"].tolist()
+        else:
+            self.process()
+
+    def process(self):
+        self.input_smiles_list, self.description_list = [], []
+        
+        print("Processing zero-shot raw file") 
+        raw_df = pd.read_csv(self.raw_filepath)
+        
+        print("Processing pairs")
+        with open(self.template_path, 'r', encoding='utf-8') as file:
+            lines = file.readlines()
+        template_list = [line.strip() for line in lines]
+
+        for idx, row in raw_df.iterrows():
+            template = random.choice(template_list)
+            task_description = re.sub(r'\${input}', 'the above molecule', template)
+            self.description_list.append(row["description"] + " " + task_description)
+            self.input_smiles_list.append(row["smiles"])
+
+        description_df = pd.DataFrame({"smiles": self.input_smiles_list, "description": self.description_list})
+        description_df.to_csv(self.processed_filepath, index=None)
+
+    def __getitem__(self, idx):
+        input_smiles = self.input_smiles_list[idx]
+        description = self.description_list[idx]
+        return input_smiles, description
+
+    def __len__(self):
+        return len(self.input_smiles_list)

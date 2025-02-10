@@ -1,14 +1,15 @@
 from collections import OrderedDict
-from typing import Tuple, Union
-
+from typing import Tuple, Union, List, Any
 import os
 import os.path as osp
 import numpy as np
+from functools import partial
+
 import torch
 import torch.nn as nn
 import torch.nn.init as init
 import torch.nn.functional as F
-from typing import Any, Union, List
+
 from transformers import AutoModel, AutoTokenizer
 
 from MolEditFormer.models.model_utils import cycle_index, pad_tensor, mean_pooling, load_mega_mol_bart, ArgsContainer
@@ -84,11 +85,12 @@ class CLIP(nn.Module):
     ):
         super().__init__()
 
+        self.mode = mode
         self.mol_branch = mol_branch
         self.mol_args = ArgsContainer(**(mol_args or {}))
         self.text_branch = text_branch
         self.text_args = ArgsContainer(**(text_args or {}))
-        self.mode = mode
+        
         self.device = device
         self.CL_args = ArgsContainer(**(CL_args or {}))
         self.fuse_args = ArgsContainer(**(fuse_args or {}))
@@ -153,65 +155,61 @@ class CLIP(nn.Module):
         self.to(self.device)
 
     def _args_check(self):
-        # args check
-        if self.mode == 'pretrain':
-            if not self.mol_branch:
-                raise ValueError("molecule branch should be enabled")
-            elif self.mol_args is None:
-                raise ValueError("mol_args should be provided")
-            elif "molecule_type" not in self.mol_args.keys() or self.mol_args.molecule_type not in self.MOLECULE_TYPE_RANGE:
-                raise ValueError("mol_args should contain valid molecule_type")
-            elif self.mol_args.molecule_type in ["2DGraph", "all"] and any(arg_name not in self.mol_args.keys() for arg_name in self.GRAPH2D_MOL_ARGS_RANGE):
-                raise ValueError(f"2DGraph mol_args should at least contain {self.GRAPH2D_MOL_ARGS_RANGE}")
-            elif self.mol_args.molecule_type in ["3DGraph", "all"] and any(arg_name not in self.mol_args.keys() for arg_name in self.GRAPH3D_MOL_ARGS_RANGE):
-                raise ValueError(f"3DGraph mol_args should at least contain {self.GRAPH3D_MOL_ARGS_RANGE}")
-            elif self.mol_args.molecule_type in ["SMILES", "all"] and any(arg_name not in self.mol_args.keys() for arg_name in self.SMILES_MOL_ARGS_RANGE):
-                raise ValueError(f"SMILES mol_args should at least contain {self.SMILES_MOL_ARGS_RANGE}")
-            
-            if not self.text_branch:
-                raise ValueError("text branch should be enabled")
-            elif self.text_args is None:
-                raise ValueError("text_args should be provided")
-            elif any(arg_name not in self.text_args.keys() for arg_name in self.TEXT_ARGS_RANGE):
-                raise ValueError(f"text_args should at least contain {self.TEXT_ARGS_RANGE}")
-            
-            if self.CL_args is None:
-                raise ValueError("CL_args should be provided")
-            elif any(arg_name not in self.CL_args.keys() for arg_name in self.CL_ARGS_RANGE):
-                raise ValueError(f"CL_args should at least contain {self.CL_ARGS_RANGE}")
-            
-        elif self.mode == 'finetune':
-            if not self.mol_branch:
-                raise ValueError("molecule branch should be enabled")
-            elif self.mol_args is None:
-                raise ValueError("mol_args should be provided")
-            elif "molecule_type" not in self.mol_args.keys() or self.mol_args.molecule_type not in self.MOLECULE_TYPE_RANGE:
-                raise ValueError("mol_args should contain valid molecule_type")
-            elif self.mol_args.molecule_type in ["2DGraph", "all"] and any(arg_name not in self.mol_args.keys() for arg_name in self.GRAPH2D_MOL_ARGS_RANGE):
-                raise ValueError(f"2DGraph mol_args should at least contain {self.GRAPH2D_MOL_ARGS_RANGE}")
-            elif self.mol_args.molecule_type in ["3DGraph", "all"] and any(arg_name not in self.mol_args.keys() for arg_name in self.GRAPH3D_MOL_ARGS_RANGE):
-                raise ValueError(f"3DGraph mol_args should at least contain {self.GRAPH3D_MOL_ARGS_RANGE}")
-            elif self.mol_args.molecule_type in ["SMILES", "all"] and any(arg_name not in self.mol_args.keys() for arg_name in self.SMILES_MOL_ARGS_RANGE):
-                raise ValueError(f"SMILES mol_args should at least contain {self.SMILES_MOL_ARGS_RANGE}")
-            
-            if not self.text_branch:
-                raise ValueError("text branch should be enabled")
-            elif self.text_args is None:
-                raise ValueError("text_args should be provided")
-            elif any(arg_name not in self.text_args.keys() for arg_name in self.TEXT_ARGS_RANGE):
-                raise ValueError(f"text_args should at least contain {self.TEXT_ARGS_RANGE}")
-            
-            if self.fuse_args is None:
-                raise ValueError("fuse_args should be provided")
-            elif any(arg_name not in self.fuse_args.keys() for arg_name in self.FUSE_ARGS_RANGE):
-                raise ValueError(f"fuse_args should at least contain {self.FUSE_ARGS_RANGE}")
-            
-        elif self.mode == 'inference':
-            pass
-
         if not self.mol_branch and not self.text_branch:
             raise ValueError("At least one of the branches should be enabled")
-        
+
+        # args check
+        if self.mode in ['pretrain', 'finetune', 'edit']:
+            if not self.mol_branch:
+                raise ValueError("molecule branch should be enabled")
+            elif self.mol_args is None:
+                raise ValueError("mol_args should be provided")
+            elif "molecule_type" not in self.mol_args.keys() or self.mol_args.molecule_type not in self.MOLECULE_TYPE_RANGE:
+                raise ValueError("mol_args should contain valid molecule_type")
+            elif self.mol_args.molecule_type in ["2DGraph", "all"] and any(arg_name not in self.mol_args.keys() for arg_name in self.GRAPH2D_MOL_ARGS_RANGE):
+                raise ValueError(f"2DGraph mol_args should at least contain {self.GRAPH2D_MOL_ARGS_RANGE}")
+            elif self.mol_args.molecule_type in ["3DGraph", "all"] and any(arg_name not in self.mol_args.keys() for arg_name in self.GRAPH3D_MOL_ARGS_RANGE):
+                raise ValueError(f"3DGraph mol_args should at least contain {self.GRAPH3D_MOL_ARGS_RANGE}")
+            elif self.mol_args.molecule_type in ["SMILES", "all"] and any(arg_name not in self.mol_args.keys() for arg_name in self.SMILES_MOL_ARGS_RANGE):
+                raise ValueError(f"SMILES mol_args should at least contain {self.SMILES_MOL_ARGS_RANGE}")
+            
+            if not self.text_branch:
+                raise ValueError("text branch should be enabled")
+            elif self.text_args is None:
+                raise ValueError("text_args should be provided")
+            elif any(arg_name not in self.text_args.keys() for arg_name in self.TEXT_ARGS_RANGE):
+                raise ValueError(f"text_args should at least contain {self.TEXT_ARGS_RANGE}")
+            
+            if self.mode == 'pretrain':
+                if self.CL_args is None:
+                    raise ValueError("CL_args should be provided")
+                elif any(arg_name not in self.CL_args.keys() for arg_name in self.CL_ARGS_RANGE):
+                    raise ValueError(f"CL_args should at least contain {self.CL_ARGS_RANGE}")
+            elif self.mode == 'finetune':
+                if self.fuse_args is None:
+                    raise ValueError("fuse_args should be provided")
+                elif any(arg_name not in self.fuse_args.keys() for arg_name in self.FUSE_ARGS_RANGE):
+                    raise ValueError(f"fuse_args should at least contain {self.FUSE_ARGS_RANGE}")
+            
+        elif self.mode == 'reconstruct':
+            if not self.mol_branch:
+                raise ValueError("molecule branch should be enabled")
+            elif self.mol_args is None:
+                raise ValueError("mol_args should be provided")
+            elif "molecule_type" not in self.mol_args.keys() or self.mol_args.molecule_type not in self.MOLECULE_TYPE_RANGE:
+                raise ValueError("mol_args should contain valid molecule_type")
+            elif self.mol_args.molecule_type in ["2DGraph", "all"] and any(arg_name not in self.mol_args.keys() for arg_name in self.GRAPH2D_MOL_ARGS_RANGE):
+                raise ValueError(f"2DGraph mol_args should at least contain {self.GRAPH2D_MOL_ARGS_RANGE}")
+            elif self.mol_args.molecule_type in ["3DGraph", "all"] and any(arg_name not in self.mol_args.keys() for arg_name in self.GRAPH3D_MOL_ARGS_RANGE):
+                raise ValueError(f"3DGraph mol_args should at least contain {self.GRAPH3D_MOL_ARGS_RANGE}")
+            elif self.mol_args.molecule_type in ["SMILES", "all"] and any(arg_name not in self.mol_args.keys() for arg_name in self.SMILES_MOL_ARGS_RANGE):
+                raise ValueError(f"SMILES mol_args should at least contain {self.SMILES_MOL_ARGS_RANGE}")
+            
+            self.text_branch = False
+
+        else:
+            raise ValueError("Invalid mode")
+
     def prepare_text_tokens(self, batch_text):
         text_input = self.text_tokenizer(batch_text, truncation=True, max_length=self.text_args.max_seq_len, padding='max_length', return_tensors='pt')
         tokens_ids = text_input['input_ids'].long().to(self.device)
@@ -253,6 +251,24 @@ class CLIP(nn.Module):
         decode_output = self.molecule_model.decode(decode_input) # logits
         return decode_output
 
+    def smiles_decoder_forward(self, decoder_input, decoder_mask, memory, memory_mask):
+        decoder_pad_mask = decoder_mask.transpose(0, 1)
+        memory_pad_mask = memory_mask.transpose(0, 1)
+
+        decoder_embs = self.molecule_model._construct_input(decoder_input)
+
+        (seq_len, _, _) = tuple(decoder_embs.size())
+        tgt_mask = \
+            self.molecule_model._generate_square_subsequent_mask(seq_len).to(decoder_embs.device)
+
+        model_output = self.molecule_model.decoder(decoder_embs, memory,
+                                    tgt_key_padding_mask=decoder_pad_mask,
+                                    memory_key_padding_mask=memory_pad_mask,
+                                    tgt_mask=tgt_mask)
+        token_output, _  = self.molecule_model.token_fc(model_output)
+        
+        return token_output
+
     def forward(self, batch_input_molecule, batch_input_text, batch_output_molecule=None, batch_output_text=None):
         if not (self.mol_branch and self.text_branch):
             missing = (["molecule"] if not self.mol_branch else []) + (["text"] if not self.text_branch else [])
@@ -260,10 +276,10 @@ class CLIP(nn.Module):
         elif self.mode == "finetune" and batch_output_molecule is None:
             raise ValueError("batch_output_molecule should be provided in finetune mode")
         
+        '''prepare tokens for each modality branch'''
         # input_text_token_ids, input_text_mask: [batch_size, text_max_seq_len]
         input_text_token_ids, input_text_mask = self.prepare_text_tokens(batch_input_text)
-        # text_embedding: [batch_size, text_max_seq_len, text_d_model]
-        # text_pooled_embedding: [batch_size, text_d_model]
+        # text_embedding: [batch_size, text_max_seq_len, text_d_model], text_pooled_embedding: [batch_size, text_d_model]
         text_embedding, text_pooled_embedding = self.encode_text_from_pretrain_model(input_text_token_ids, input_text_mask)
 
         if self.mol_args.molecule_type in ["SMILES", "all"]:
@@ -278,7 +294,7 @@ class CLIP(nn.Module):
             pass
         
         if self.mode == "pretrain":
-            output_molecule_token_ids, output_molecule_mask = input_molecule_token_ids, input_molecule_mask
+            output_molecule_token_ids, output_molecule_mask = input_molecule_token_ids.clone(), input_molecule_mask.clone()
             # text_repr: [batch_size, text_d_model]
             text_repr = mean_pooling(text_embedding.transpose(0, 1), input_text_mask.transpose(0, 1))
             # text_latent: [batch_size, SSL_emb_dim]
@@ -288,38 +304,41 @@ class CLIP(nn.Module):
             # molecule_latent: [batch_size, SSL_emb_dim]
             molecule_latent = self.mol2latent(molecule_repr)
             if self.mol_args.molecule_type in ["SMILES", "all"]:
-                # decode_logits: [mol_max_seq_len, batch_size, vocab_size]
-                decode_logits = self.decode_smiles(input_molecule_token_ids, input_molecule_mask, molecule_embedding)
+                # token_output: [mol_max_seq_len-1, batch_size, vocab_size]
+                token_output = self.smiles_decoder_forward(decoder_input=output_molecule_token_ids[:-1, :], decoder_mask=output_molecule_mask[:-1, :], memory=molecule_embedding, memory_mask=input_molecule_mask)
             elif self.mol_args.molecule_type in ["2DGraph", "all"]:
                 # molecule_repr = self.encode_graph(batch_molecule)
                 pass
             elif self.mol_args.molecule_type in ["3DGraph", "all"]:
                 pass
-            cl_loss, mask_loss = self._calc_pretrain_loss(molecule_latent, text_latent, output_molecule_token_ids, output_molecule_mask, decode_logits)
-
+            cl_loss, mask_loss = self._calc_pretrain_loss(molecule_latent=molecule_latent, text_latent=text_latent, target_token_ids=output_molecule_token_ids[1:, :], target_mask=output_molecule_mask[1:, :], token_output=token_output)
+    
         elif self.mode == "finetune":
             fused_molecule_embedding = self.modality_fuser(molecule_embedding, text_embedding.transpose(0, 1), input_text_mask)
+            
             if self.mol_args.molecule_type in ["SMILES", "all"]:
                 # output_molecule_token_ids, output_molecule_mask: [mol_max_seq_len, batch_size]
                 output_molecule_token_ids, output_molecule_mask = self.prepare_smiles_tokens(batch_output_molecule)
-                # decode_logits: [mol_max_seq_len, batch_size, vocab_size]
-                decode_logits = self.decode_smiles(output_molecule_token_ids, output_molecule_mask, fused_molecule_embedding)
+                # token_output: [mol_max_seq_len-1, batch_size, vocab_size]
+                token_output = self.smiles_decoder_forward(decoder_input=output_molecule_token_ids[:-1, :], decoder_mask=output_molecule_mask[:-1, :], memory=fused_molecule_embedding, memory_mask=input_molecule_mask)
             elif self.mol_args.molecule_type in ["2DGraph", "all"]:
                 # molecule_repr = self.encode_graph(batch_molecule)
                 pass
             elif self.mol_args.molecule_type in ["3DGraph", "all"]:
                 pass
-            mask_loss = self._calc_finetune_loss(output_molecule_token_ids, output_molecule_mask, decode_logits)
+            mask_loss = self._calc_finetune_loss(target_token_ids=output_molecule_token_ids[1:, :], target_mask=output_molecule_mask[1:, :], token_output=token_output)
             cl_loss = None
+            if torch.isnan(mask_loss):
+                mask_loss = "nan_error"
         return cl_loss, mask_loss
 
-    def _calc_pretrain_loss(self, molecule_latent, text_latent, smiles_token_ids, smiles_mask, decoder_output):
+    def _calc_pretrain_loss(self, molecule_latent, text_latent, target_token_ids, target_mask, token_output):
         cl_loss = (self._calc_cl_loss(molecule_latent, text_latent) + self._calc_cl_loss(text_latent, molecule_latent)) / 2
-        mask_loss = self._calc_mask_loss(smiles_token_ids, smiles_mask, decoder_output)
+        mask_loss = self._calc_mask_loss(target_token_ids, target_mask, token_output)
         return cl_loss, mask_loss
 
-    def _calc_finetune_loss(self, smiles_token_ids, smiles_mask, decoder_output):
-        mask_loss = self._calc_mask_loss(smiles_token_ids, smiles_mask, decoder_output)
+    def _calc_finetune_loss(self, target_token_ids, target_mask, token_output):
+        mask_loss = self._calc_mask_loss(target_token_ids, target_mask, token_output)
         return mask_loss
 
     def _calc_cl_loss(self, latent_1, latent_2):
@@ -359,13 +378,13 @@ class CLIP(nn.Module):
             raise Exception
         return CL_loss
 
-    def _calc_mask_loss(self, smiles_token_ids, smiles_mask, decoder_output):
+    def _calc_mask_loss(self, target_token_ids, target_mask, token_output):
         """ Calculate the loss for the token prediction task
 
         Args:
-            smiles_token_ids (Tensor of shape (seq_len, batch_size)): Original (unmasked) SMILES token ids from the tokenizer
-            smiles_mask (Tensor of shape (seq_len, batch_size)): Pad mask for target tokens
-            decoder_output (Tensor of shape (seq_len, batch_size, vocab_size)): token output from transformer
+            target_token_ids (Tensor of shape (seq_len, batch_size)): Original (unmasked) SMILES token ids from the tokenizer
+            target_mask (Tensor of shape (seq_len, batch_size)): Pad mask for target tokens
+            token_output (Tensor of shape (seq_len, batch_size, vocab_size)): token output from transformer
 
         Output:
             loss (singleton Tensor): Loss computed using cross-entropy,
@@ -373,31 +392,131 @@ class CLIP(nn.Module):
         pad_token_idx = self.molecule_tokenizer.vocab[self.molecule_tokenizer.pad_token]
         mask_loss_func = nn.CrossEntropyLoss(reduction='none', ignore_index=pad_token_idx)
 
-        (seq_len, batch_size) = tuple(smiles_token_ids.size())
-        token_pred = decoder_output.reshape((seq_len * batch_size, -1)).float()
-        loss = mask_loss_func(token_pred, smiles_token_ids.reshape(-1)).reshape((seq_len, batch_size))
-        inv_target_mask = ~(smiles_mask > 0)
+        (seq_len, batch_size) = tuple(target_token_ids.size())
+        token_pred = token_output.reshape((seq_len * batch_size, -1)).float()
+        loss = mask_loss_func(token_pred, target_token_ids.reshape(-1)).reshape((seq_len, batch_size))
+        inv_target_mask = ~(target_mask > 0)
         num_tokens = inv_target_mask.sum()
         loss = loss.sum() / num_tokens
         return loss
 
-    def sample_molecules(self, batch_input, sampling_alg="greedy"):
-        """Sample molecules from the model
+    def _sample_molecules_smiles(self, tokenized_batch_input_smiles, sampling_alg='greedy'):
+        """ Sample molecules from the model
 
         Args:
-            batch_input (dict): Input given to model, should contain batch['encoder_input] meaning Smiles token_ids and batch['encoder_pad_mask'] meaning Smiles pad_mask
-            sampling_alg (str): Algorithm to use to sample SMILES strings from model, choice = ['greedy', 'beam']
+            tokenized_batch_input_smiles (dict): Input Smiles' token ids and pad masks given to model
+            sampling_alg (str): Algorithm to use to sample SMILES strings from model
 
         Returns:
             ([[str]], [[float]]): Tuple of molecule SMILES strings and log lhs (outer dimension is batch)
+        """
+        smiles_encoder_input = tokenized_batch_input_smiles['molecule_encoder_input']
+        smiles_encoder_mask = tokenized_batch_input_smiles['molecule_encoder_pad_mask']
+
+        # Freezing the weights reduces the amount of memory leakage in the transformer
+        #model.eval()
+
+        with torch.no_grad():
+            smiles_memory = self.encode_smiles(smiles_token_ids= smiles_encoder_input, smiles_mask=smiles_encoder_mask)
+            smiles_memory_mask = smiles_encoder_mask.clone()
+            (_, batch_size, _) = tuple(smiles_memory.size())
+            decode_fn = partial(self.molecule_model._decode_fn, memory=smiles_memory,
+                                mem_pad_mask=smiles_memory_mask)
+            #self.sampler.device = self.device
+            if sampling_alg == 'greedy':
+                (mol_strs, log_lhs) = \
+                    self.molecule_model.sampler.greedy_decode(decode_fn, batch_size, device=smiles_memory.device)
+            elif sampling_alg == 'beam':
+                (mol_strs, log_lhs) = \
+                    self.molecule_model.sampler.beam_decode(decode_fn, batch_size, device=smiles_memory.device, k=self.num_beams)
+
+        # Must remember to unfreeze!
+        #model.train()
+
+        return (mol_strs, log_lhs)
+
+    def reconstruct_molecules(self, batch_input_molecule, sampling_alg="greedy"):
+        """Sample molecules from the model
+
+        Args:
+            batch_input_molecule (list): Input Smiles list
+            sampling_alg (str): Algorithm to use to sample SMILES strings from model, choice = ['greedy', 'beam']
+
+        Returns:
+            batch_output_molecule (list[str]): list of reconstructed SMILES strings of Input molecules
         """
         if self.mol_args.molecule_type in ["2DGraph", "all"]:
             pass
         if self.mol_args.molecule_type in ["3DGraph", "all"]:
             pass
         if self.mol_args.molecule_type in ["SMILES", "all"]:
-            mol_strs, log_lhs = self.molecule_model.sample_molecules(batch_input=batch_input, sampling_alg=sampling_alg)
-        return mol_strs, log_lhs
+            molecule_token_ids, molecule_pad_mask = self.prepare_smiles_tokens(batch_input_molecule)
+            tokenized_batch_input = {'molecule_encoder_input': molecule_token_ids, 'molecule_encoder_pad_mask': molecule_pad_mask}
+            batch_output_molecule, _ = self._sample_molecules_smiles(tokenized_batch_input, sampling_alg=sampling_alg)
+        return batch_output_molecule
+
+    def _edit_molecules_smiles(self, tokenized_batch_input, sampling_alg='greedy'):
+        """ Sample molecules from the model
+
+        Args:
+            tokenized_batch_input (dict): Input Smiles' token ids, pad masks and Input texts' token ids, pad masks given to model
+            sampling_alg (str): Algorithm to use to sample SMILES strings from model
+
+        Returns:
+            ([[str]], [[float]]): Tuple of molecule SMILES strings and log lhs (outer dimension is batch)
+        """
+        smiles_encoder_input = tokenized_batch_input['molecule_encoder_input']
+        smiles_encoder_mask = tokenized_batch_input['molecule_encoder_pad_mask']
+        text_encoder_input = tokenized_batch_input['text_encoder_input']
+        text_encoder_mask = tokenized_batch_input['text_encoder_pad_mask']
+
+        # Freezing the weights reduces the amount of memory leakage in the transformer
+        #model.eval()
+
+        with torch.no_grad():
+            smiles_memory = self.encode_smiles(smiles_token_ids= smiles_encoder_input, smiles_mask=smiles_encoder_mask)
+            smiles_memory_mask = smiles_encoder_mask.clone()
+            text_memory, _ = self.encode_text_from_pretrain_model(text_token_ids=text_encoder_input, text_mask=text_encoder_mask)
+            fused_smiles_memory = self.modality_fuser(smiles_memory, text_memory.transpose(0, 1), text_encoder_mask)
+
+            (_, batch_size, _) = tuple(fused_smiles_memory.size())
+            decode_fn = partial(self.molecule_model._decode_fn, memory=fused_smiles_memory,
+                                mem_pad_mask=smiles_memory_mask)
+            #self.sampler.device = self.device
+            if sampling_alg == 'greedy':
+                (mol_strs, log_lhs) = \
+                    self.molecule_model.sampler.greedy_decode(decode_fn, batch_size, device=fused_smiles_memory.device)
+            elif sampling_alg == 'beam':
+                (mol_strs, log_lhs) = \
+                    self.molecule_model.sampler.beam_decode(decode_fn, batch_size, device=fused_smiles_memory.device, k=self.num_beams)
+
+        # Must remember to unfreeze!
+        #model.train()
+
+        return (mol_strs, log_lhs)
+
+    def edit_molecules(self, batch_input_molecule, batch_input_text, sampling_alg="greedy"):
+        """edit input molecules based on input text
+
+        Args:
+            batch_input_molecule (list): Input smiles list
+            batch_input_text (list): Input text list
+            sampling_alg (str): Algorithm to use to sample SMILES strings from model, choice = ['greedy', 'beam']
+
+        Returns:
+            batch_output_molecule (list[str]): list of edited SMILES strings with Input molecules and texts
+        """
+        text_token_ids, text_pad_mask = self.prepare_text_tokens(batch_input_text)
+
+        if self.mol_args.molecule_type in ["2DGraph", "all"]:
+            pass
+        if self.mol_args.molecule_type in ["3DGraph", "all"]:
+            pass
+        if self.mol_args.molecule_type in ["SMILES", "all"]:
+            molecule_token_ids, molecule_pad_mask = self.prepare_smiles_tokens(batch_input_molecule)
+            tokenized_batch_input = {'molecule_encoder_input': molecule_token_ids, 'molecule_encoder_pad_mask': molecule_pad_mask, 'text_encoder_input': text_token_ids, 'text_encoder_pad_mask': text_pad_mask}
+            batch_output_molecule, _ = self._edit_molecules_smiles(tokenized_batch_input, sampling_alg=sampling_alg)
+        return batch_output_molecule
 
     def save_model(self, save_dir, prefix="", config=None):
         if not osp.exists(save_dir):

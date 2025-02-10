@@ -1,17 +1,20 @@
 python3 -m MolEditFormer.smiles_finetune \
+    --log_freq 200 \
     --model_mode finetune \
     --text_tokenizer_dir ckpt/SciBERT \
-    --text_model_path ckpt/MolEditFormer/pretrain/PubChemEdit-ZINC250K-SMILE-Decoder-Jan-15-2025/best_text_model.pth \
-    --mol_model_path ckpt/MolEditFormer/pretrain/PubChemEdit-ZINC250K-SMILE-Decoder-Jan-15-2025/best_molecule_model.pth \
+    --text_model_path ckpt/MolEditFormer/pretrain/PubChemEdit-ZINC250K-SMILE-Decoder-Jan-21-2025/best_text_model.pth \
+    --mol_model_path ckpt/MolEditFormer/pretrain/PubChemEdit-ZINC250K-SMILE-Decoder-Jan-21-2025/best_molecule_model.pth \
     --dataset_mode main \
     --data_dir data/MolPair/mol_pair \
-    --batch_size 32 \
+    --max_num_pairs_per_task 25000 \
+    --batch_size 48 \
     --store_dir ckpt/MolEditFormer/finetune \
-    --dir_name MolPair-SMILE-Decoder-Jan-16-2025 \
-    --num_layers 8 \
+    --dir_name MolPair-SMILE-Encoder-Fuser-Feb-09-2025 \
+    --num_layers 4 \
     --num_heads 8 \
     --dropout 0.1 \
-    --epoch_num 5 \
-    --lr 2e-5 \
+    --epoch_num 20 \
+    --text_lr 2e-5 \
+    --fuser_lr 1e-4 \
     --seed 42 \
     --gpu 0

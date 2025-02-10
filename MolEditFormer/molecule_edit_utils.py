@@ -518,30 +518,29 @@ def evaluate_SMILES_list(SMILES_list, description):
     return answer
 
 
-
-def evaluate_SMILES_success_rate(input_smi, output_smi, task_id):
+def evaluate_molecular_edit_result(input_smi, output_smi, task_id):
     '''
-    input_smi: str # input SMILES
-    output_smi: str # output SMILES
-    task_id: int # pre-defined task id in DESCRIPTION_DICT above
-
-    output: bool # success or not
+    Args:
+        input_smi: str # input SMILES
+        output_smi: str # output SMILES
+        task_id: int # pre-defined task id in DESCRIPTION_DICT above
+    
+    Returns:
+        output: bool # success or not
+        reason: str # fail reason
     '''
     # check smiles validation
     input_mol = Chem.MolFromSmiles(input_smi)
     output_mol = Chem.MolFromSmiles(output_smi)
     if input_mol is None and output_mol is None:
-        return False
-        # return False, "both invalid SMILES"
+        return False, "invalid input and output"
     elif input_mol is None and output_mol is not None:
-        return False
-        # return False, "invalid input SMILES"
+        return False, "invalid input"
     elif input_mol is not None and output_mol is None:
-        return False
-        # return False, "invalid output SMILES"
+        return False, "invalid output"
 
     success_flag = True
-    # record = []
+    reason_list = []
     # logP evaluation
     if task_id in [101, 102, 201, 202, 203, 204, 205, 206, 501, 502, 503, 504, 601]:
         input_prop = Descriptors.MolLogP(input_mol)
@@ -549,11 +548,11 @@ def evaluate_SMILES_success_rate(input_smi, output_smi, task_id):
         if task_id in [101, 201, 203, 205, 206, 501, 504]:
             if input_prop <= output_prop:
                 success_flag = False
-                # record.append(f"logP input:{input_prop} <= output:{output_prop} failed")
+                reason_list.append("higher logP")
         elif task_id in [102, 202, 204, 502, 503]:
             if input_prop >= output_prop:
                 success_flag = False
-                # record.append(f"logP input:{input_prop} >= output:{output_prop} failed")
+                reason_list.append("lower logP")
     # QED evaluation
     if task_id in [103, 104]:
         input_prop = Descriptors.qed(input_mol)
@@ -561,11 +560,11 @@ def evaluate_SMILES_success_rate(input_smi, output_smi, task_id):
         if task_id in [103]:
             if input_prop >= output_prop:
                 success_flag = False
-                # record.append(f"QED input:{input_prop} >= output:{output_prop} failed")
+                reason_list.append("lower QED")
         elif task_id in [104]:
             if input_prop <= output_prop:
                 success_flag = False
-                # record.append(f"QED input:{input_prop} <= output:{output_prop} failed")
+                reason_list.append("higher QED")
     # TPSA evaluation
     if task_id in [105, 106, 205, 206, 505, 506]:
         input_prop = Descriptors.TPSA(input_mol)
@@ -573,11 +572,11 @@ def evaluate_SMILES_success_rate(input_smi, output_smi, task_id):
         if task_id in [105, 205, 506]:
             if input_prop <= output_prop:
                 success_flag = False
-                # record.append(f"TPSA input:{input_prop} <= output:{output_prop} failed")
+                reason_list.append("higher TPSA")
         elif task_id in [106, 206, 505]:
             if input_prop >= output_prop:
                 success_flag = False
-                # record.append(f"TPSA input:{input_prop} >= output:{output_prop} failed")
+                reason_list.append("lower TPSA")
     # HBA evaluation
     if task_id in [107, 201, 202, 507]:
         input_prop = Descriptors.NumHAcceptors(input_mol)
@@ -585,11 +584,11 @@ def evaluate_SMILES_success_rate(input_smi, output_smi, task_id):
         if task_id in [107, 201, 202]:
             if input_prop >= output_prop:
                 success_flag = False
-                # record.append(f"hydrogen bond acceptors input:{input_prop} >= output:{output_prop} failed")
+                reason_list.append("lower HBA")
         elif task_id in [507]:
             if input_prop <= output_prop:
                 success_flag = False
-                # record.append(f"hydrogen bond acceptors input:{input_prop} <= output:{output_prop} failed")
+                reason_list.append("higher HBA")
     # HBD evaluation
     if task_id in [108, 203, 204, 508]:
         input_prop = Descriptors.NumHDonors(input_mol)
@@ -597,11 +596,11 @@ def evaluate_SMILES_success_rate(input_smi, output_smi, task_id):
         if task_id in [108, 203, 204]:
             if input_prop >= output_prop:
                 success_flag = False
-                # record.append(f"hydrogen bond donors input:{input_prop} >= output:{output_prop} failed")
+                reason_list.append("lower HBD")
         elif task_id in [508]:
             if input_prop <= output_prop:
                 success_flag = False
-                # record.append(f"hydrogen bond donors input:{input_prop} <= output:{output_prop} failed")
+                reason_list.append("higher HBD")
     # Molecular Weight evaluation
     if task_id in [509, 510]:
         input_prop = Descriptors.MolWt(input_mol)
@@ -609,13 +608,13 @@ def evaluate_SMILES_success_rate(input_smi, output_smi, task_id):
         if task_id in [509]:
             if input_prop >= output_prop:
                 success_flag = False
-                # record.append(f"Molecular Weight input:{input_prop} >= output:{output_prop} failed")
+                reason_list.append("lower MW")
         elif task_id in [510]:
             if input_prop <= output_prop:
                 success_flag = False
-                # record.append(f"Molecular Weight input:{input_prop} <= output:{output_prop} failed")
-    return success_flag
-    # if success_flag:
-        # return success_flag, "success"
-    # else:
-        # return success_flag, " and ".join(record)
+                reason_list.append("higher MW")
+
+    if success_flag:
+        return success_flag, "success"
+    else:
+        return success_flag, ", ".join(reason_list) + "caused failure"

@@ -1,0 +1,12 @@
+python3 -m MolEditFormer.megamolbart_reconstruct \
+    --model_mode inference \
+    --molecule_type SMILES \
+    --no_text_branch \
+    --mol_model_path ckpt/MegaMolBART/model_weight.pth \
+    --data_source PubChemEdit \
+    --dataset_mode main \
+    --data_dir data/PubChemEdit/version_1 \
+    --sampling_alg beam \
+    --batch_size 1 \
+    --seed 42 \
+    --gpu 0

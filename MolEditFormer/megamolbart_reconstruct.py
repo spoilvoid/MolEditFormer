@@ -24,6 +24,7 @@ from transformers import AutoModel, AutoTokenizer
 from MolEditFormer.basic_utils import seed_all, Logger
 from MolEditFormer.models import CLIP
 from MolEditFormer.datasets import PubChemEdit, MolPair_SingleGraph, MolGraphDataset
+from MolEditFormer.models import MegaMolBART
 
 
 def main(args):
@@ -34,42 +35,9 @@ def main(args):
     if not osp.exists(result_save_dir):
         os.makedirs(result_save_dir)
 
-    if args.molecule_type in ["2DGraph", "all"]:
-        mol_args = {
-            "molecule_type": args.molecule_type,
-            "gnn_type": args.gnn_type,
-            "num_layer": args.num_layer,
-            "gnn_emb_dim": args.gnn_emb_dim,
-            "JK": args.JK,
-            "dropout_ratio": args.dropout_ratio,
-            "graph_pooling": args.graph_pooling,
-            "model_path": args.mol_model_path,
-        }
-    if args.molecule_type in ["3DGraph", "all"]:
-        pass
-    if args.molecule_type in ["SMILES", "all"]:
-        mol_args = {
-            "molecule_type": args.molecule_type,
-            "smiles_emb_dim": args.smiles_emb_dim, 
-            "vocab_path" : args.smiles_vocab_path, 
-            "model_path": args.mol_model_path,
-        }
+    gen_model_wrapper = MegaMolBART(vocab_path=args.smiles_vocab_path, input_dir="ckpt/MegaMolBART/checkpoints", output_dir=None)
 
-    model = CLIP(
-        mol_branch=args.mol_branch,
-        text_branch=args.text_branch,
-        mode=args.model_mode,
-        device=device,
-        mol_args=mol_args,
-        text_args=None,
-        CL_args=None,
-    ).to(device)
-    model.eval()
-
-    if args.data_source == "PubChemEdit":
-        test_set = PubChemEdit(args.data_dir, mode=args.dataset_mode, can_smiles=args.can_smiles)
-    elif args.data_source == "MolPair":
-        test_set = MolPair_SingleGraph(args.data_dir)
+    test_set = PubChemEdit(args.data_dir, mode=args.dataset_mode, can_smiles=args.can_smiles)
     test_loader = pyg_DataLoader(test_set, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
 
     original_smiles_list, result_smiles_list = [], []
@@ -86,13 +54,14 @@ def main(args):
             molecule_batched = sample_batched[0]
         elif args.molecule_type == "all":
             pass
-        original_smiles_list.extend(molecule_batched)
-        token_ids, pad_mask = model.prepare_smiles_tokens(molecule_batched)
-        batch_input = {'encoder_input': token_ids, 'encoder_pad_mask': pad_mask}
-        output_mol_strs, _ = model.sample_molecules(batch_input, sampling_alg=args.sampling_alg)
-        result_smiles_list.extend(output_mol_strs)
-        print(f"input batch smiles {molecule_batched}")
-        print(f"output batch smiles {output_mol_strs}")
+        for smi in molecule_batched:
+            print("input ", smi)
+            original_smiles_list.extend(molecule_batched)
+            latent_code_init, pad_mask_init = gen_model_wrapper.smileslist2embedding([smi])  # [pad, B, d], 
+        
+            regenerated_mol = gen_model_wrapper.inverse_transform([latent_code_init], pad_mask_init.bool().cuda(), k=1, sanitize=True)[0]
+            result_smiles_list.extend(regenerated_mol)
+            print("output ", regenerated_mol)
     
     df = pd.DataFrame({
         'original_smiles': original_smiles_list,
@@ -121,7 +90,7 @@ if __name__ == "__main__":
     parser.add_argument("--num_workers", type=int, default=8)
     # inference config
     parser.add_argument("--sampling_alg", type=str, default="greedy", choices=["greedy", "beam"])
-    parser.add_argument("--model_mode", type=str, default="reconstruct", choices=["pretrain", "finetune", "reconstruct", "edit"])
+    parser.add_argument("--model_mode", type=str, default="inference", choices=["pretrain", "finetune", "inference", "edit"])
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--gpu", type=int, default=1)
     # model config
@@ -154,7 +123,8 @@ if __name__ == "__main__":
     parser.add_argument('--text_projector_path', type=str, default=None)
     parser.add_argument('--mol_projector_path', type=str, default=None)
     # save config
-    parser.add_argument("--store_dir", type=str, default="ckpt/MolAlign/inference/reconstruct")
+    parser.add_argument("--store_dir", type=str, default="ckpt/MolAlign/inference")
+    parser.add_argument("--dir_name", type=str, default="")
 
     args = parser.parse_args()
 

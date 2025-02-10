@@ -107,7 +107,6 @@ def main(args):
     train_set = MolPair_PairSmiles(args.data_dir, mode=args.dataset_mode, max_num_pairs_per_task=args.max_num_pairs_per_task)
     train_loader = DataLoader(train_set, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
 
-    # 需要注意应当只有fuser被训练
     model_param_group = [
         {"params": model.text_model.parameters(), "lr": args.text_lr},
         {"params": model.modality_fuser.parameters(), "lr": args.fuser_lr},
@@ -127,6 +126,7 @@ def main(args):
     else:
         raise ValueError("Invalid warmup choice")
 
+    nan_flag = False
     optimal_loss = args.loss_threshold
     for epoch_id in range(args.start_epoch, args.epoch_num):
         epoch_loss = 0.0
@@ -137,6 +137,14 @@ def main(args):
             
             _, mask_loss = model(input_molecule_batched, description_batched, batch_output_molecule=output_molecule_batched)
             all_loss = mask_loss
+            
+            if all_loss == "nan_error":
+                print("nan_error")
+                print("data:", input_molecule_batched, description_batched, output_molecule_batched)
+                nan_flag = True
+                model.save_model(model_save_dir, f"nan_model", save_config)
+                break
+
             optimizer.zero_grad()
             torch.cuda.empty_cache()
             all_loss.backward()
@@ -153,6 +161,9 @@ def main(args):
                 if loss < optimal_loss:
                     model.save_model(model_save_dir, f"epoch{epoch_id}_batch{i_batch+1}", save_config)
             epoch_loss += loss / len(train_loader)
+
+        if nan_flag:
+            break
 
         if args.warmup_choice == "epoch":
             scheduler.step()
@@ -171,14 +182,14 @@ if __name__ == "__main__":
     parser.add_argument("--time_log", type=bool, default=True)
     parser.add_argument("--log_freq", type=int, default=1000)
     # dataset config
-    parser.add_argument("--data_dir", type=str, default="data/PubChemEdit_ZINC250k")
+    parser.add_argument("--data_dir", type=str, default="data/MolPair/mol_pair")
     parser.add_argument("--dataset_mode", type=str, default="main", choices=["full", "main", "expand"])
     parser.add_argument("--max_num_pairs_per_task", type=int, default=40000)
     # dataloader config
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--num_workers", type=int, default=8)
     # train config
-    parser.add_argument("--model_mode", type=str, default="finetune", choices=["pretrain", "finetune", "inference"])
+    parser.add_argument("--model_mode", type=str, default="finetune", choices=["pretrain", "finetune", "reconstruct", "edit"])
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--gpu", type=int, default=1)
     parser.add_argument("--start_epoch", type=int, default=0)
