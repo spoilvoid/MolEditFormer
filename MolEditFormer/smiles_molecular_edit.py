@@ -81,19 +81,21 @@ def main(args):
         result_smiles_list.extend(edited_molecule_batched)
 
     result_dict = {}
-    count = 0
-    
     for input_smi in list(set(original_smiles_list)):
         result_dict[input_smi] = {"invalid":[], "unsatisfied":[], "successful":[]}
     for input_smi, output_smi in zip(original_smiles_list, result_smiles_list):
         result, reason = evaluate_molecular_edit_result(input_smi, output_smi, task_id=args.task_id)
         if result:
             result_dict[input_smi]["successful"].append(output_smi)
-            count += 1
         elif "invalid" in reason:
             result_dict[input_smi]["invalid"].append(output_smi)
         else:
             result_dict[input_smi]["unsatisfied"].append(output_smi)
+    
+    count = 0
+    for input_smi in result_dict.keys():
+        if len(result_dict[input_smi]["successful"]) > 0:
+            count += 1
     
     success_rate = count / len(list(set(original_smiles_list)))
     result_dict["success_rate"] = success_rate

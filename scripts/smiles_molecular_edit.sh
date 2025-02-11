@@ -11,7 +11,7 @@ do
         --store_dir ckpt/MolEditFormer/inference/edit \
         --dir_name MolPair-SMILE-Encoder-Fuser-Feb-08-2025/iterative \
         --sampling_alg greedy \
-        --batch_size 8 \
+        --batch_size 48 \
         --seed 42 \
         --gpu 0
 done
@@ -29,7 +29,7 @@ do
         --store_dir ckpt/MolEditFormer/inference/edit \
         --dir_name MolPair-SMILE-Encoder-Fuser-Feb-08-2025/iterative \
         --sampling_alg greedy \
-        --batch_size 8 \
+        --batch_size 48 \
         --seed 42 \
         --gpu 0
 done
