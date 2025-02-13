@@ -158,10 +158,10 @@ class MolPair_PairSmiles(Dataset):
         self.template_dir = os.path.join(self.root, "raw", "template")
         self.pair_dir = os.path.join(self.root, "raw", "pair")
 
-        self.description_filepath = os.path.join(self.root, self.mode, "processed_description.csv")
-        self.pair_filepath = os.path.join(self.root, self.mode, "processed_pair.csv")
-        if not os.path.exists(os.path.join(self.root, self.mode)):
-            os.makedirs(os.path.join(self.root, self.mode))
+        self.description_filepath = os.path.join(self.root, f"num{self.max_num_pairs_per_task}_"+self.mode, "processed_description.csv")
+        self.pair_filepath = os.path.join(self.root, f"num{self.max_num_pairs_per_task}_"+self.mode, "processed_pair.csv")
+        if not os.path.exists(os.path.join(self.root, f"num{self.max_num_pairs_per_task}_"+self.mode)):
+            os.makedirs(os.path.join(self.root, f"num{self.max_num_pairs_per_task}_"+self.mode))
         
         if os.path.exists(self.description_filepath) and os.path.exists(self.pair_filepath):
             pair_df = pd.read_csv(self.pair_filepath)
