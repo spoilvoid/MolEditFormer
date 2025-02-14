@@ -231,7 +231,7 @@ class MolPair_PairSmiles(Dataset):
         return len(self.input_smiles_list)
 
 
-class MolPair_PairSmiles_ZeroShot_Test(Dataset):
+class MolPair_PairSmiles_Test(Dataset):
     def __init__(self, root, task_id, mode="random"):
         self.root = root
         if mode not in RETRIEVAL_MODE:

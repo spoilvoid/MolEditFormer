@@ -24,7 +24,7 @@ from transformers import AutoModel, AutoTokenizer
 from models import CLIP
 from datasets import PubChemEdit, MolPair_SingleGraph , DataHelper, MolGraphDataset
 
-from MolEditFormer.basic_utils import get_local_time, freeze_network, seed_all, Logger
+from MolEditFormer.MolEditFormer.utils.basic_utils import get_local_time, freeze_network, seed_all, Logger
 from MolEditFormer.models import MegaMolBART
 
 

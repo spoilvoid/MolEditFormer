@@ -11,6 +11,7 @@ from rdkit.Chem import AllChem, Descriptors
 from rdkit import DataStructs
 
 from MolEditFormer.models import MLP
+from MolEditFormer.utils import PlogP
 
 
 lg = RDLogger.logger()
@@ -613,6 +614,56 @@ def evaluate_molecular_edit_result(input_smi, output_smi, task_id):
             if input_prop <= output_prop:
                 success_flag = False
                 reason_list.append("higher MW")
+
+    if success_flag:
+        return success_flag, "success"
+    else:
+        return success_flag, ", ".join(reason_list) + "caused failure"
+
+
+def evaluate_latent_optimization_result(input_smi, output_smi, task_name, sim_threshold=0.4):
+    '''
+    Args:
+        input_smi: str # input SMILES
+        output_smi: str # output SMILES
+        task_name: int # pre-defined task name "QED_constrained_optimization" and "PlogP_constrained_optimization
+        sim_threshold: float # similarity threshold 0.2/0.4/0.6
+    
+    Returns:
+        output: bool # success or not
+        reason: str # fail reason
+    '''
+    # check smiles validation
+    input_mol = Chem.MolFromSmiles(input_smi)
+    output_mol = Chem.MolFromSmiles(output_smi)
+    if input_mol is None and output_mol is None:
+        return False, "invalid input and output"
+    elif input_mol is None and output_mol is not None:
+        return False, "invalid input"
+    elif input_mol is not None and output_mol is None:
+        return False, "invalid output"
+
+    success_flag = True
+    reason_list = []
+    if task_name == "QED_constrained_optimization":
+        sim = get_molecule_similarity(input_mol, output_mol)
+        output_prop = Descriptors.qed(output_mol)
+        if output_prop < 0.9:
+            success_flag = False
+            reason_list.append("not enough high QED")
+        if sim < sim_threshold:
+            success_flag = False
+            reason_list.append("not enough similarity")
+    elif task_name == "PlogP_constrained_optimization":
+        sim = get_molecule_similarity(input_mol, output_mol)
+        input_prop = PlogP.calculateScore(input_mol)
+        output_prop = PlogP.calculateScore(output_mol)
+        if output_prop <= input_prop:
+            success_flag = False
+            reason_list.append("not increase PlogP")
+        if sim < sim_threshold:
+            success_flag = False
+            reason_list.append("not enough similarity")
 
     if success_flag:
         return success_flag, "success"
