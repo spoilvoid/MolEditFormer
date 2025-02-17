@@ -20,8 +20,8 @@ from torch.utils.tensorboard import SummaryWriter
 
 from transformers import AutoModel, AutoTokenizer
 
-from MolEditFormer.MolEditFormer.utils.basic_utils import get_local_time, seed_all, Logger
-from MolEditFormer.MolEditFormer.utils.molecule_edit_utils import evaluate_molecular_edit_result
+from MolEditFormer.utils.basic_utils import get_local_time, seed_all, Logger
+from MolEditFormer.utils.molecule_edit_utils import evaluate_molecular_edit_result
 from MolEditFormer.models import CLIP
 from MolEditFormer.datasets import MolPair_PairSmiles_Test
 
@@ -67,7 +67,7 @@ def main(args):
     ).to(device)
     model.eval()
 
-    test_set = MolPair_PairSmiles_Test(args.data_dir, task_id=args.task_id, mode=args.dataset_mode)
+    test_set = MolPair_PairSmiles_Test(root=osp.join(args.data_dir, args.description_mode) , task_id=args.task_id, mode=args.dataset_mode)
     test_loader = DataLoader(test_set, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
 
     original_smiles_list, result_smiles_list = [], []
@@ -110,6 +110,7 @@ if __name__ == "__main__":
     # dataset config
     parser.add_argument("--data_dir", type=str, default="data/EditBenchmark/zero_shot")
     parser.add_argument("--dataset_mode", type=str, default="random", choices=["random", "iterative"])
+    parser.add_argument("--description_mode", type=str, default="valued", choices=["valued", "tagged_v1", "tagged_v1"])
     parser.add_argument("--task_id", type=int, default=101, choices=list(range(101, 109))+list(range(201, 207)))
     # dataloader config
     parser.add_argument("--batch_size", type=int, default=32)

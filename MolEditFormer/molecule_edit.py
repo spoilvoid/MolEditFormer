@@ -13,7 +13,7 @@ import torch.nn as nn
 from torch import optim
 import torch.nn.functional as F
 
-from MolEditFormer.MolEditFormer.utils.molecule_edit_utils import load_space_projector, get_edit_SMILES_list, get_edit_prompt, evaluate_SMILES_list, evaluate_SMILES_success_rate
+from MolEditFormer.utils.molecule_edit_utils import load_space_projector, get_edit_SMILES_list, get_edit_prompt, evaluate_SMILES_list, evaluate_SMILES_success_rate
 from MolEditFormer.MolEditFormer.utils.basic_utils import get_local_time, seed_all, default_dump
 from MolEditFormer.models import CLIP, MegaMolBART, MLP
 

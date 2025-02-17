@@ -20,8 +20,8 @@ from torch.utils.tensorboard import SummaryWriter
 
 from transformers import AutoModel, AutoTokenizer
 
-from MolEditFormer.MolEditFormer.utils.basic_utils import get_local_time, seed_all, Logger
-from MolEditFormer.MolEditFormer.utils.molecule_edit_utils import evaluate_latent_optimization_result
+from MolEditFormer.utils.basic_utils import get_local_time, seed_all, Logger
+from MolEditFormer.utils.molecule_edit_utils import evaluate_latent_optimization_result
 from MolEditFormer.models import CLIP
 from MolEditFormer.datasets import MolPair_PairSmiles_Test
 
@@ -67,7 +67,7 @@ def main(args):
     ).to(device)
     model.eval()
 
-    test_set = MolPair_PairSmiles_Test(args.data_dir, task_id=args.task_name, mode=args.dataset_mode)
+    test_set = MolPair_PairSmiles_Test(osp.join(args.data_dir, args.task_name, args.description_mode), task_id=args.task_name, mode=args.dataset_mode)
     test_loader = DataLoader(test_set, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
 
     original_smiles_list, result_smiles_list = [], []
@@ -82,15 +82,23 @@ def main(args):
 
     result_dict = {}
     for input_smi in list(set(original_smiles_list)):
-        result_dict[input_smi] = {"invalid":[], "unsatisfied":[], "successful":[]}
+        result_dict[input_smi] = {"invalid":[],"low_sim":[], "not_increase":[], "not_enough":[],"low_sim_not_increase":[], "low_sim_not_enough":[],  "successful":[]}
     for input_smi, output_smi in zip(original_smiles_list, result_smiles_list):
         result, reason = evaluate_latent_optimization_result(input_smi, output_smi, task_name=args.task_name, sim_threshold=args.sim_threshold)
         if result:
             result_dict[input_smi]["successful"].append(output_smi)
         elif "invalid" in reason:
             result_dict[input_smi]["invalid"].append(output_smi)
-        else:
-            result_dict[input_smi]["unsatisfied"].append(output_smi)
+        elif "not enough" in reason and "low similarity" in reason:
+            result_dict[input_smi]["low_sim_not_enough"].append(output_smi)
+        elif "not increase" in reason and "low similarity" in reason:
+            result_dict[input_smi]["low_sim_not_increase"].append(output_smi)
+        elif "not enough" in reason:
+            result_dict[input_smi]["not_enough"].append(output_smi)
+        elif "not increase" in reason:
+            result_dict[input_smi]["not_increase"].append(output_smi)
+        elif "low similarity" in reason:
+            result_dict[input_smi]["low_sim"].append(output_smi)
     
     count = 0
     for input_smi in result_dict.keys():
@@ -111,6 +119,7 @@ if __name__ == "__main__":
     parser.add_argument("--data_dir", type=str, default="data/EditBenchmark/QED_constrained_optimization")
     parser.add_argument("--dataset_mode", type=str, default="random", choices=["random", "iterative"])
     parser.add_argument("--task_name", type=str, default="QED_constrained_optimization", choices=["QED_constrained_optimization", "PlogP_constrained_optimization"])
+    parser.add_argument("--description_mode", type=str, default="valued", choices=["valued", "tagged_v1", "tagged_v1"])
     parser.add_argument("--sim_threshold", type=float, default=0.4, choices=[0.2, 0.4, 0.6])
     # dataloader config
     parser.add_argument("--batch_size", type=int, default=32)

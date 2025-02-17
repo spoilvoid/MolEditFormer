@@ -21,7 +21,7 @@ from torch_geometric.data import Data
 from torch_geometric.loader import DataLoader as pyg_DataLoader
 from transformers import AutoModel, AutoTokenizer
 
-from MolEditFormer.MolEditFormer.utils.basic_utils import seed_all, Logger
+from MolEditFormer.utils.basic_utils import seed_all, Logger
 from MolEditFormer.models import CLIP
 from MolEditFormer.datasets import PubChemEdit, MolPair_SingleGraph, MolGraphDataset
 

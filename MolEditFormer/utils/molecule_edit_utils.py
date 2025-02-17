@@ -1,14 +1,16 @@
 import os
 import os.path as osp
+import numpy as np
 import copy
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from transformers import AutoModel, AutoTokenizer
 
-from rdkit import Chem, RDLogger
-from rdkit.Chem import AllChem, Descriptors
-from rdkit import DataStructs
+from rdkit import Chem, RDLogger, DataStructs
+from rdkit.Chem import AllChem, Descriptors, BRICS
+from rdkit.Chem.Scaffolds import MurckoScaffold
 
 from MolEditFormer.models import MLP
 from MolEditFormer.utils import PlogP
@@ -215,6 +217,67 @@ def get_molecule_similarity(mol_a, mol_b):
     fp_b = AllChem.GetMorganFingerprintAsBitVect(mol_b, 2, nBits=1024)
     sim = DataStructs.TanimotoSimilarity(fp_a, fp_b)
     return sim
+
+
+def get_murcko_scaffold(mol):
+    try:
+        scaffold_mol = MurckoScaffold.GetScaffoldForMol(mol)
+        scaffold_smiles = Chem.MolToSmiles(scaffold_mol)
+        return scaffold_smiles
+    except:
+        return ""
+
+
+def get_BRICS_scaffold(mol):
+    try:
+        fragment_list = BRICS.BRICSDecompose(mol, returnMols=True)
+        max_carbon_count, max_atom_count = 0, 0
+        for frag_mol in fragment_list:
+            atoms = frag_mol.GetAtoms()
+            atom_count = len(atoms)
+
+            carbon_count = 0
+            for atom in atoms:
+                if atom.GetSymbol() == 'C':
+                    carbon_count += 1
+                if atom.GetIsotope() != 0:
+                    atom.SetIsotope(0)
+            
+            if atom_count > max_atom_count or (atom_count == max_atom_count and carbon_count > max_carbon_count):
+                max_carbon_count, max_atom_count = carbon_count, atom_count
+                max_frag_mol = frag_mol
+        max_frag_smiles = Chem.MolToSmiles(max_frag_mol)
+        return max_frag_smiles
+    except:
+        return ""
+
+
+def dynamic_similarity_threshold(avg_mw, alpha: float = 0.7, upper_threshold: float = 0.6, lower_threshold: float = 0.2, mw_threshold: int = 250, power: float = 0.5, smooth: bool = False):
+    if smooth:
+        return upper_threshold * (1 - np.exp(-alpha * avg_mw))
+    elif avg_mw >= mw_threshold:
+        return upper_threshold
+    else:
+        return lower_threshold + (upper_threshold - lower_threshold) * ((avg_mw / mw_threshold) ** power)
+
+
+def check_main_substructure(mol1, mol2, threshold: float = 0.5):
+    mw1, mw2 = Descriptors.MolWt(mol1), Descriptors.MolWt(mol2)
+    atom_num1, atom_num2 = mol1.GetNumAtoms(), mol2.GetNumAtoms()
+
+    murcko_scaffold_smi, murcko_scaffold_smi2 = get_murcko_scaffold(mol1), get_murcko_scaffold(mol2)
+    murcko_scaffold_mol1, murcko_scaffold_mol2 = Chem.MolFromSmiles(murcko_scaffold_smi), Chem.MolFromSmiles(murcko_scaffold_smi2)
+    murcko_scaffold_mw1, murcko_scaffold_mw2 = Descriptors.MolWt(murcko_scaffold_mol1), Descriptors.MolWt(murcko_scaffold_mol2)
+    murcko_scaffold_atom_num1, murcko_scaffold_atom_num2 = murcko_scaffold_mol1.GetNumAtoms(), murcko_scaffold_mol2.GetNumAtoms()
+    murcko_scaffold_result = (murcko_scaffold_smi == murcko_scaffold_smi2) and (murcko_scaffold_mw1/float(mw1)>=threshold or murcko_scaffold_atom_num1/float(atom_num1)>=threshold) and (murcko_scaffold_mw2/float(mw2)>=threshold or murcko_scaffold_atom_num2/float(atom_num2)>=threshold)
+
+    BRICS_scaffold_smi, BRICS_scaffold_smi2 = get_BRICS_scaffold(mol1), get_BRICS_scaffold(mol2)
+    BRICS_scaffold_mol1, BRICS_scaffold_mol2 = Chem.MolFromSmiles(BRICS_scaffold_smi), Chem.MolFromSmiles(BRICS_scaffold_smi2)
+    BRICS_scaffold_mw1, BRICS_scaffold_mw2 = Descriptors.MolWt(BRICS_scaffold_mol1), Descriptors.MolWt(BRICS_scaffold_mol2)
+    BRICS_scaffold_atom_num1, BRICS_scaffold_atom_num2 = BRICS_scaffold_mol1.GetNumAtoms(), BRICS_scaffold_mol2.GetNumAtoms()
+    BRICS_scaffold_result = (BRICS_scaffold_smi == BRICS_scaffold_smi2) and (BRICS_scaffold_mw1/float(mw1)>=threshold or BRICS_scaffold_atom_num1/float(atom_num1)>=threshold) and (BRICS_scaffold_mw2/float(mw2)>=threshold or BRICS_scaffold_atom_num2/float(atom_num2)>=threshold)
+
+    return murcko_scaffold_result or BRICS_scaffold_result
 
 
 def evaluate_SMILES_list(SMILES_list, description):
@@ -647,13 +710,17 @@ def evaluate_latent_optimization_result(input_smi, output_smi, task_name, sim_th
     reason_list = []
     if task_name == "QED_constrained_optimization":
         sim = get_molecule_similarity(input_mol, output_mol)
+        input_prop = Descriptors.qed(input_mol)
         output_prop = Descriptors.qed(output_mol)
         if output_prop < 0.9:
             success_flag = False
-            reason_list.append("not enough high QED")
+            if input_prop >= output_prop:
+                reason_list.append("not increase QED")
+            else:
+                reason_list.append("not enough high QED")
         if sim < sim_threshold:
             success_flag = False
-            reason_list.append("not enough similarity")
+            reason_list.append("low similarity")
     elif task_name == "PlogP_constrained_optimization":
         sim = get_molecule_similarity(input_mol, output_mol)
         input_prop = PlogP.calculateScore(input_mol)
@@ -663,7 +730,7 @@ def evaluate_latent_optimization_result(input_smi, output_smi, task_name, sim_th
             reason_list.append("not increase PlogP")
         if sim < sim_threshold:
             success_flag = False
-            reason_list.append("not enough similarity")
+            reason_list.append("low similarity")
 
     if success_flag:
         return success_flag, "success"

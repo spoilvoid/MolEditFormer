@@ -18,7 +18,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from transformers import AutoModel, AutoTokenizer
 
-from MolEditFormer.MolEditFormer.utils.basic_utils import get_local_time, seed_all, Logger
+from MolEditFormer.utils.basic_utils import get_local_time, seed_all, Logger
 from MolEditFormer.models import CLIP
 from MolEditFormer.datasets import MolPair_PairGraph, MolPair_PairSmiles
 
