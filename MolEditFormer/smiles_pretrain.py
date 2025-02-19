@@ -107,7 +107,7 @@ def main(args):
     ).to(device)
     model.train()
 
-    train_set = PubChemEdit_ZINC250k(args.data_dir, mode=args.dataset_mode, can_smiles=args.can_smiles)
+    train_set = PubChemEdit_ZINC250k(args.data_dir, mode=args.dataset_mode, can_smiles=args.can_smiles, version=args.version)
     train_loader = DataLoader(train_set, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
 
     model_param_group = [
@@ -179,6 +179,7 @@ if __name__ == "__main__":
     # dataset config
     parser.add_argument("--data_dir", type=str, default="data/PubChemEdit_ZINC250k")
     parser.add_argument("--dataset_mode", type=str, default="main", choices=["full", "main", "expand"])
+    parser.add_argument("--version", type=str, default="v1", choices=["v1", "v2", "v3", "v4"])
     parser.add_argument("--can_smiles", action="store_true")
     # dataloader config
     parser.add_argument("--batch_size", type=int, default=32)

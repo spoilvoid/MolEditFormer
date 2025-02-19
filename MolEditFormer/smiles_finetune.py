@@ -104,7 +104,7 @@ def main(args):
     ).to(device)
     model.train()
 
-    train_set = MolPair_PairSmiles(args.data_dir, mode=args.dataset_mode, max_num_pairs_per_task=args.max_num_pairs_per_task)
+    train_set = MolPair_PairSmiles(args.data_dir, args.template_path, mode=args.dataset_mode, max_num_pairs_per_task=args.max_num_pairs_per_task, version=args.version)
     train_loader = DataLoader(train_set, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
 
     model_param_group = [
@@ -183,6 +183,8 @@ if __name__ == "__main__":
     parser.add_argument("--log_freq", type=int, default=1000)
     # dataset config
     parser.add_argument("--data_dir", type=str, default="data/MolPair/mol_pair")
+    parser.add_argument("--template_path", type=str, default="template/template.txt")
+    parser.add_argument("--version", type=str, default="v1", choices=["v1", "v2", "v3", "v4"])
     parser.add_argument("--dataset_mode", type=str, default="main", choices=["full", "main", "expand"])
     parser.add_argument("--max_num_pairs_per_task", type=int, default=25000)
     # dataloader config

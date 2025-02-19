@@ -67,7 +67,7 @@ def main(args):
     ).to(device)
     model.eval()
 
-    test_set = MolPair_PairSmiles_Test(osp.join(args.data_dir, args.task_name, args.description_mode), task_id=args.task_name, mode=args.dataset_mode)
+    test_set = MolPair_PairSmiles_Test(root=args.data_dir, template_path=args.template_path, task_id=args.task_name, mode=args.dataset_mode, version=args.version)
     test_loader = DataLoader(test_set, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
 
     original_smiles_list, result_smiles_list = [], []
@@ -118,8 +118,9 @@ if __name__ == "__main__":
     # dataset config
     parser.add_argument("--data_dir", type=str, default="data/EditBenchmark/QED_constrained_optimization")
     parser.add_argument("--dataset_mode", type=str, default="random", choices=["random", "iterative"])
+    parser.add_argument("--template_path", type=str, default="template/template.txt")
     parser.add_argument("--task_name", type=str, default="QED_constrained_optimization", choices=["QED_constrained_optimization", "PlogP_constrained_optimization"])
-    parser.add_argument("--description_mode", type=str, default="valued", choices=["valued", "tagged_v1", "tagged_v1"])
+    parser.add_argument("--version", type=str, default="v1", choices=["v1", "v2", "v3", "v4"])
     parser.add_argument("--sim_threshold", type=float, default=0.4, choices=[0.2, 0.4, 0.6])
     # dataloader config
     parser.add_argument("--batch_size", type=int, default=32)

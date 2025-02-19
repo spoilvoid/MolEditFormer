@@ -1,8 +1,10 @@
 import os
+import os.path as osp
 import gzip
 import json
 import random
 import re
+import numpy as np
 import pandas as pd
 from itertools import repeat
 from tqdm import tqdm
@@ -18,16 +20,13 @@ from torch.utils.data import Dataset
 from torch_geometric.data import Data, InMemoryDataset
 
 from MolEditFormer.datasets import dataset_utils
-
-
-DESCRIPTION_MODE = ["full", "main", "expand"]
-RETRIEVAL_MODE = ["random", "iterative"]
+from MolEditFormer.datasets.dataset_utils import DESCRIPTION_MODE, RETRIEVAL_MODE, VERSION, TEXT_REQUIREMENTS_V1, TEXT_REQUIREMENTS_V2, TEXT_REQUIREMENTS_V3, TEXT_REQUIREMENTS_V4, LEVEL_LABELS_PROP_NAME, LEVEL_LABELS_PROP_EXPLANATION, TASK_REFERENCE
 
 
 class MolPair_SingleGraph(InMemoryDataset):
     def __init__(self, root, subset_size=None, transform=None, pre_transform=None, pre_filter=None):
         self.root = root
-        self.raw_filepath = os.path.join(self.root, "raw/smiles_descriptions.json")
+        self.raw_filepath = osp.join(self.root, "raw/smiles_descriptions.json")
         with open(self.raw_filepath, 'r') as f:
             description_dict = json.load(f)
         self.SMILES_list = list(description_dict.keys())
@@ -43,7 +42,7 @@ class MolPair_SingleGraph(InMemoryDataset):
 
     @property
     def processed_dir(self):
-        return os.path.join(self.root, 'processed')
+        return osp.join(self.root, 'processed')
 
     @property
     def processed_file_names(self):
@@ -93,7 +92,7 @@ class MolPair_SingleGraph(InMemoryDataset):
 class MolPair_PairGraph(InMemoryDataset):
     def __init__(self, root, subset_size=None, transform=None, pre_transform=None, pre_filter=None):
         self.root = root
-        self.raw_SMILES_filepath = os.path.join(self.root, "physical_prop/allset/raw_data.csv")
+        self.raw_SMILES_filepath = osp.join(self.root, "physical_prop/allset/raw_data.csv")
         df = pd.read_csv(self.raw_SMILES_filepath)
         self.SMILES_list = df['smiles'].tolist()
         
@@ -107,7 +106,7 @@ class MolPair_PairGraph(InMemoryDataset):
 
     @property
     def processed_dir(self):
-        return os.path.join(self.root, 'processed')
+        return osp.join(self.root, 'processed')
 
     @property
     def processed_file_names(self):
@@ -146,24 +145,31 @@ class MolPair_PairGraph(InMemoryDataset):
 
 
 class MolPair_PairSmiles(Dataset):
-    def __init__(self, root, mode="main", max_num_pairs_per_task=40000):
-        self.root = root
+    def __init__(self, root, template_path, mode="main", max_num_pairs_per_task=40000, version="v1"):
+        self.template_path = template_path
         if mode not in DESCRIPTION_MODE:
             raise ValueError(f"Invalid mode: {mode}, choose from {DESCRIPTION_MODE}")
         self.mode = mode
+        if version not in VERSION:
+            raise ValueError(f"Invalid version: {version}, choose from {VERSION}")
+        if version in ["v1", "v2"]:
+            self.root = osp.join(self.root, "valued_"+version)
+        elif version in ["v3", "v4"]:
+            self.root = osp.join(self.root, "tagged_"+version)
+        self.version = version
         self.max_num_pairs_per_task = max_num_pairs_per_task
 
-        self.PubchemEdit_filepath = os.path.join(self.root, "raw", "description", "PubChemEdit.json")
-        self.additional_ZINC250k_filepath = os.path.join(self.root, "raw", "description", "additional_ZINC250k.csv")
-        self.template_dir = os.path.join(self.root, "raw", "template")
-        self.pair_dir = os.path.join(self.root, "raw", "pair")
-
-        self.description_filepath = os.path.join(self.root, f"num{self.max_num_pairs_per_task}_"+self.mode, "processed_description.csv")
-        self.pair_filepath = os.path.join(self.root, f"num{self.max_num_pairs_per_task}_"+self.mode, "processed_pair.csv")
-        if not os.path.exists(os.path.join(self.root, f"num{self.max_num_pairs_per_task}_"+self.mode)):
-            os.makedirs(os.path.join(self.root, f"num{self.max_num_pairs_per_task}_"+self.mode))
+        self.PubchemEdit_filepath = osp.join(self.root, "raw", "description", "PubChemEdit.json")
+        self.additional_ZINC250k_filepath = osp.join(self.root, "raw", "description", "additional_ZINC250k.csv")
         
-        if os.path.exists(self.description_filepath) and os.path.exists(self.pair_filepath):
+        self.pair_dir = osp.join(self.root, "raw", "pair")
+
+        self.description_filepath = osp.join(self.root, f"num{self.max_num_pairs_per_task}_"+self.mode, "processed_description.csv")
+        self.pair_filepath = osp.join(self.root, f"num{self.max_num_pairs_per_task}_"+self.mode, "processed_pair.csv")
+        if not osp.exists(osp.join(self.root, f"num{self.max_num_pairs_per_task}_"+self.mode)):
+            os.makedirs(osp.join(self.root, f"num{self.max_num_pairs_per_task}_"+self.mode))
+        
+        if osp.exists(self.description_filepath) and osp.exists(self.pair_filepath):
             pair_df = pd.read_csv(self.pair_filepath)
             description_df = pd.read_csv(self.description_filepath)
             self.input_smiles_list = pair_df["smiles1"].tolist()
@@ -188,11 +194,17 @@ class MolPair_PairSmiles(Dataset):
             else:
                 raise ValueError(f"Invalid mode: {self.mode}")
             description_dict[item["RDKit_IsoSmiles"]] = " ".join(raw_descriptions)
+
         print("Processing additional ZINC250k")
         additional_ZINC250k_df = pd.read_csv(self.additional_ZINC250k_filepath)
         for idx, row in tqdm(additional_ZINC250k_df.iterrows(), total=len(additional_ZINC250k_df)):
             description_dict[row["smiles"]] = row["description"]
         
+        print("Processing templates")
+        with open(self.template_path, 'r', encoding='utf-8') as file:
+            lines = file.readlines()
+        self.template_list = [line.strip() for line in lines]
+
         print("Processing pairs")
         for pair_file in tqdm(os.listdir(self.pair_dir)):
             match = re.search(r'task_(\d+)\.csv', pair_file)
@@ -200,17 +212,30 @@ class MolPair_PairSmiles(Dataset):
                 task_id = match.group(1)
             else:
                 raise ValueError(f"Invalid pair file: {pair_file}")
-            
+
             pair_df = pd.read_csv(os.path.join(self.pair_dir, pair_file))
-            with open(os.path.join(self.template_dir, f"task_{task_id}.txt"), 'r', encoding='utf-8') as file:
-                lines = file.readlines()
-            template_list = [line.strip() for line in lines]
 
             if len(pair_df) > self.max_num_pairs_per_task:
                 pair_df = pair_df.sample(n=self.max_num_pairs_per_task)
             for idx, row in pair_df.iterrows():
-                template = random.choice(template_list)
+                template = random.choice(self.template_list)
                 task_description = re.sub(r'\${input}', 'the above molecule', template)
+                if self.version == "v1":
+                    task_description = re.sub(r'\${requirement}', TEXT_REQUIREMENTS_V1[task_id], task_description)
+                elif self.version == "v2":
+                    task_description = re.sub(r'\${requirement}', TEXT_REQUIREMENTS_V2[task_id], task_description)
+                elif self.version == "v3":
+                    task_description = re.sub(r'\${requirement}', TEXT_REQUIREMENTS_V3[task_id], task_description)
+                    for key, value in row.items():
+                        match = re.search(r'smiles1_level(\d+)', key)
+                        if match:
+                            input_prop_num = match.group(1)
+                            task_description = re.sub(r'\${input_level'+input_prop_num+'}', value, task_description)
+                        match = re.search(r'smiles2_level(\d+)', key)
+                        if match:
+                            input_prop_num = match.group(1)
+                            task_description = re.sub(r'\${output_level'+input_prop_num+'}', value, task_description)
+                
                 self.description_list.append(description_dict[row["smiles1"]] + " " + task_description)
                 self.input_smiles_list.append(row["smiles1"])
                 self.output_smiles_list.append(row["smiles2"])
@@ -232,20 +257,26 @@ class MolPair_PairSmiles(Dataset):
 
 
 class MolPair_PairSmiles_Test(Dataset):
-    def __init__(self, root, task_id, mode="random"):
-        self.root = root
+    def __init__(self, root, template_path, task_id, mode="random", version="v1"):
+        self.template_path = template_path
         if mode not in RETRIEVAL_MODE:
             raise ValueError(f"Invalid mode: {mode}, choose from {RETRIEVAL_MODE}")
         self.mode = mode
-        self.task_id = task_id
-        self.raw_filepath = os.path.join(self.root, "raw", f"raw_data.csv")
-        self.template_path = os.path.join(self.root, "raw", "template", f"task_{task_id}.txt")
+        if version not in VERSION:
+            raise ValueError(f"Invalid ask_version: {version}, choose from {VERSION}")
+        if version in ["v1", "v2"]:
+            self.root = osp.join(self.root, "valued_"+version)
+        elif version in ["v3", "v4"]:
+            self.root = osp.join(self.root, "tagged_"+version)
+        self.version = version
+        self.task_id = str(task_id)
+        self.raw_filepath = osp.join(self.root, "raw", f"raw_data.csv")
 
-        self.processed_filepath = os.path.join(self.root, self.mode, f"task_{task_id}_input.csv")
-        if not os.path.exists(os.path.join(self.root, self.mode)):
-            os.makedirs(os.path.join(self.root, self.mode))
+        self.processed_filepath = osp.join(self.root, self.mode, f"task_{task_id}_input.csv")
+        if not osp.exists(osp.join(self.root, self.mode)):
+            os.makedirs(osp.join(self.root, self.mode))
         
-        if os.path.exists(self.processed_filepath):
+        if osp.exists(self.processed_filepath):
             processed_df = pd.read_csv(self.processed_filepath)
             self.input_smiles_list = processed_df["smiles"].tolist()
             self.description_list = processed_df["description"].tolist()
@@ -257,22 +288,44 @@ class MolPair_PairSmiles_Test(Dataset):
         
         print("Processing zero-shot raw file") 
         raw_df = pd.read_csv(self.raw_filepath)
-        
-        print("Processing pairs")
+
+        print("Processing templates")
         with open(self.template_path, 'r', encoding='utf-8') as file:
             lines = file.readlines()
-        template_list = [line.strip() for line in lines]
+        self.template_list = [line.strip() for line in lines]
 
+        print("Processing pairs")
         if self.mode == "random":
             for idx, row in tqdm(raw_df.iterrows()):
                 template = random.choice(template_list)
                 task_description = re.sub(r'\${input}', 'the above molecule', template)
+                if self.version == "v1":
+                    task_description = re.sub(r'\${requirement}', TEXT_REQUIREMENTS_V1[self.task_id], task_description)
+                elif self.version == "v2":
+                    task_description = re.sub(r'\${requirement}', TEXT_REQUIREMENTS_V2[self.task_id], task_description)
+                elif self.version == "v3":
+                    task_description = re.sub(r'\${requirement}', TEXT_REQUIREMENTS_V3[self.task_id], task_description)
+                    task_description = re.sub(r'\${output_level(\d+)}', "another level", task_description)
+                    for name_key, ref_prop in TASK_REFERENCE[self.task_id]:
+                        prop_level = row[ref_prop+"_level"]
+                        task_description = re.sub(r'\${'+name_key+'}', prop_level, task_description)
                 self.description_list.append(row["description"] + " " + task_description)
                 self.input_smiles_list.append(row["smiles"])
         elif self.mode == "iterative":
             for idx, row in tqdm(raw_df.iterrows()):
+                TASK_REFERENCE[self.task_id] 
                 for template in template_list:
                     task_description = re.sub(r'\${input}', 'the above molecule', template)
+                    if self.version == "v1":
+                        task_description = re.sub(r'\${requirement}', TEXT_REQUIREMENTS_V1[self.task_id], task_description)
+                    elif self.version == "v2":
+                        task_description = re.sub(r'\${requirement}', TEXT_REQUIREMENTS_V2[self.task_id], task_description)
+                    elif self.version == "v3":
+                        task_description = re.sub(r'\${requirement}', TEXT_REQUIREMENTS_V3[self.task_id], task_description)
+                        task_description = re.sub(r'\${output_level(\d+)}', "another level", task_description)
+                        for name_key, ref_prop in TASK_REFERENCE[self.task_id]:
+                            prop_level = row[ref_prop+"_level"]
+                            task_description = re.sub(r'\${'+name_key+'}', prop_level, task_description)
                     self.description_list.append(row["description"] + " " + task_description)
                     self.input_smiles_list.append(row["smiles"])
         else:

@@ -12,15 +12,20 @@ import torch
 from torch.utils.data import Dataset
 
 from MolEditFormer.datasets import dataset_utils
-
-
-DESCRIPTION_MODE = ["full", "main", "expand"]
+from MolEditFormer.datasets.dataset_utils import DESCRIPTION_MODE, VERSION
 
 
 class PubChemEdit_ZINC250k(Dataset):
-    def __init__(self, root, mode="full", can_smiles=True):
-        self.root = root
+    def __init__(self, root, mode="full", can_smiles=True, version="v1"):
+        if mode not in DESCRIPTION_MODE:
+            raise ValueError(f"Invalid mode: {mode}, choose from {DESCRIPTION_MODE}")
         self.mode = mode
+        if version not in VERSION:
+            raise ValueError(f"Invalid version: {version}, choose from {VERSION}")
+        if version in ["v1", "v2"]:
+            self.root = osp.join(self.root, "valued_"+version)
+        elif version in ["v3", "v4"]:
+            self.root = osp.join(self.root, "tagged_"+version)
         self.can_smiles = can_smiles
 
         self.PubchemEdit_filepath = os.path.join(self.root, "raw", "PubChemEdit.json")
