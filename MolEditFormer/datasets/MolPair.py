@@ -153,9 +153,9 @@ class MolPair_PairSmiles(Dataset):
         if version not in VERSION:
             raise ValueError(f"Invalid version: {version}, choose from {VERSION}")
         if version in ["v1", "v2"]:
-            self.root = osp.join(self.root, "valued_"+version)
+            self.root = osp.join(root, "valued_"+version)
         elif version in ["v3", "v4"]:
-            self.root = osp.join(self.root, "tagged_"+version)
+            self.root = osp.join(root, "tagged_"+version)
         self.version = version
         self.max_num_pairs_per_task = max_num_pairs_per_task
 
@@ -265,9 +265,9 @@ class MolPair_PairSmiles_Test(Dataset):
         if version not in VERSION:
             raise ValueError(f"Invalid ask_version: {version}, choose from {VERSION}")
         if version in ["v1", "v2"]:
-            self.root = osp.join(self.root, "valued_"+version)
+            self.root = osp.join(root, "valued_"+version)
         elif version in ["v3", "v4"]:
-            self.root = osp.join(self.root, "tagged_"+version)
+            self.root = osp.join(root, "tagged_"+version)
         self.version = version
         self.task_id = str(task_id)
         self.raw_filepath = osp.join(self.root, "raw", f"raw_data.csv")
@@ -297,7 +297,7 @@ class MolPair_PairSmiles_Test(Dataset):
         print("Processing pairs")
         if self.mode == "random":
             for idx, row in tqdm(raw_df.iterrows()):
-                template = random.choice(template_list)
+                template = random.choice(self.template_list)
                 task_description = re.sub(r'\${input}', 'the above molecule', template)
                 if self.version == "v1":
                     task_description = re.sub(r'\${requirement}', TEXT_REQUIREMENTS_V1[self.task_id], task_description)
@@ -306,7 +306,7 @@ class MolPair_PairSmiles_Test(Dataset):
                 elif self.version == "v3":
                     task_description = re.sub(r'\${requirement}', TEXT_REQUIREMENTS_V3[self.task_id], task_description)
                     task_description = re.sub(r'\${output_level(\d+)}', "another level", task_description)
-                    for name_key, ref_prop in TASK_REFERENCE[self.task_id]:
+                    for name_key, ref_prop in TASK_REFERENCE[self.task_id].items():
                         prop_level = row[ref_prop+"_level"]
                         task_description = re.sub(r'\${'+name_key+'}', prop_level, task_description)
                 self.description_list.append(row["description"] + " " + task_description)
@@ -314,7 +314,7 @@ class MolPair_PairSmiles_Test(Dataset):
         elif self.mode == "iterative":
             for idx, row in tqdm(raw_df.iterrows()):
                 TASK_REFERENCE[self.task_id] 
-                for template in template_list:
+                for template in self.template_list:
                     task_description = re.sub(r'\${input}', 'the above molecule', template)
                     if self.version == "v1":
                         task_description = re.sub(r'\${requirement}', TEXT_REQUIREMENTS_V1[self.task_id], task_description)
@@ -323,7 +323,7 @@ class MolPair_PairSmiles_Test(Dataset):
                     elif self.version == "v3":
                         task_description = re.sub(r'\${requirement}', TEXT_REQUIREMENTS_V3[self.task_id], task_description)
                         task_description = re.sub(r'\${output_level(\d+)}', "another level", task_description)
-                        for name_key, ref_prop in TASK_REFERENCE[self.task_id]:
+                        for name_key, ref_prop in TASK_REFERENCE[self.task_id].items():
                             prop_level = row[ref_prop+"_level"]
                             task_description = re.sub(r'\${'+name_key+'}', prop_level, task_description)
                     self.description_list.append(row["description"] + " " + task_description)

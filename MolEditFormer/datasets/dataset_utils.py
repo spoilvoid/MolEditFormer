@@ -25,8 +25,8 @@ TEXT_REQUIREMENTS_V1 = {
     "204": "increase logP and increase HBD",
     "205": "decrease logP and decrease TPSA",
     "206": "decrease logP and increase TPSA",
-    "qed_test": "increase QED to at least 0.9",
-    "plogp_test": "increase PlogP as much as possible",
+    "QED_constrained_optimization": "increase QED to at least 0.9",
+    "PlogP_constrained_optimization": "increase PlogP as much as possible",
 }
 TEXT_REQUIREMENTS_V2 = {
     "101": "more soluble in water",
@@ -43,8 +43,8 @@ TEXT_REQUIREMENTS_V2 = {
     "204": "more insoluble in water and more hydrogen bond donors",
     "205": "more soluble in water and more permeable",
     "206": "more soluble in water and less permeable",
-    "qed_test": "more like a drug to at least 0.9",
-    "plogp_test": "more penalized insoluble in water as much as possible",
+    "QED_constrained_optimization": "more like a drug to at least 0.9",
+    "PlogP_constrained_optimization": "more penalized insoluble in water as much as possible",
 }
 TEXT_REQUIREMENTS_V3 = {
     "101": "decrease logP from ${input_level1} to ${output_level1}",
@@ -61,8 +61,8 @@ TEXT_REQUIREMENTS_V3 = {
     "204": "increase logP from ${input_level1} to ${output_level1} and increase HBD from ${input_level2} to ${output_level2}",
     "205": "decrease logP from ${input_level1} to ${output_level1} and decrease TPSA from ${input_level2} to ${output_level2}",
     "206": "decrease logP from ${input_level1} to ${output_level1} and increase TPSA from ${input_level2} to ${output_level2}",
-    "qed_test": "increase QED from high to extremely high",
-    "plogp_test": "increase PlogP as much as possible",
+    "QED_constrained_optimization": "increase QED from high to extremely high",
+    "PlogP_constrained_optimization": "increase PlogP as much as possible",
 }
 TEXT_REQUIREMENTS_V4 = {
     "101": "",
@@ -79,8 +79,8 @@ TEXT_REQUIREMENTS_V4 = {
     "204": "",
     "205": "",
     "206": "",
-    "qed_test": "",
-    "plogp_test": "",
+    "QED_constrained_optimization": "",
+    "PlogP_constrained_optimization": "",
 }
 LEVEL_LABELS_PROP_NAME = {
     "QED": {
@@ -227,8 +227,8 @@ TASK_REFERENCE = {
     "204": {"input_level1": "logP", "input_level2": "HBD"},
     "205": {"input_level1": "logP", "input_level2": "TPSA"},
     "206": {"input_level1": "logP", "input_level2": "TPSA"},
-    "qed_test": {"input_level1": "QED"},
-    "plogp_test": {"input_level1": "PlogP"},
+    "QED_constrained_optimization": {"input_level1": "QED"},
+    "PlogP_constrained_optimization": {"input_level1": "PlogP"},
 }
 
 
