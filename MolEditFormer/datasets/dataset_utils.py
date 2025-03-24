@@ -27,6 +27,10 @@ TEXT_REQUIREMENTS_V1 = {
     "206": "decrease logP and increase TPSA",
     "QED_constrained_optimization": "increase QED to at least 0.9",
     "PlogP_constrained_optimization": "increase PlogP as much as possible",
+    "COX2": "increase the binding affinity for the target",
+    "DRD2": "increase the binding affinity for the target",
+    "EGFR": "increase the binding affinity for the target",
+    "SARS_Cov_3C": "increase the binding affinity for the target",
 }
 TEXT_REQUIREMENTS_V2 = {
     "101": "more soluble in water",
@@ -45,6 +49,10 @@ TEXT_REQUIREMENTS_V2 = {
     "206": "more soluble in water and less permeable",
     "QED_constrained_optimization": "more like a drug to at least 0.9",
     "PlogP_constrained_optimization": "more penalized insoluble in water as much as possible",
+    "COX2": "make the binding with the target stronger and more stable",
+    "DRD2": "make the binding with the target stronger and more stable",
+    "EGFR": "make the binding with the target stronger and more stable",
+    "SARS_Cov_3C": "make the binding with the target stronger and more stable",
 }
 TEXT_REQUIREMENTS_V3 = {
     "101": "decrease logP from ${input_level1} to ${output_level1}",
@@ -63,6 +71,10 @@ TEXT_REQUIREMENTS_V3 = {
     "206": "decrease logP from ${input_level1} to ${output_level1} and increase TPSA from ${input_level2} to ${output_level2}",
     "QED_constrained_optimization": "increase QED from high to extremely high",
     "PlogP_constrained_optimization": "increase PlogP as much as possible",
+    "COX2": "increase the binding affinity for the target from ${input_level1} to ${output_level1}",
+    "DRD2": "increase the binding affinity for the target from ${input_level1} to ${output_level1}",
+    "EGFR": "increase the binding affinity for the target from ${input_level1} to ${output_level1}",
+    "SARS_Cov_3C": "increase the binding affinity for the target from ${input_level1} to ${output_level1}",
 }
 TEXT_REQUIREMENTS_V4 = {
     "101": "",
@@ -81,6 +93,10 @@ TEXT_REQUIREMENTS_V4 = {
     "206": "",
     "QED_constrained_optimization": "",
     "PlogP_constrained_optimization": "",
+    "COX2": "",
+    "DRD2": "",
+    "EGFR": "",
+    "SARS_Cov_3C": "",
 }
 LEVEL_LABELS_PROP_NAME = {
     "QED": {
@@ -229,6 +245,10 @@ TASK_REFERENCE = {
     "206": {"input_level1": "logP", "input_level2": "TPSA"},
     "QED_constrained_optimization": {"input_level1": "QED"},
     "PlogP_constrained_optimization": {"input_level1": "PlogP"},
+    "COX2": {"input_level1": "binding_affinity"},
+    "DRD2": {"input_level1": "binding_affinity"},
+    "EGFR": {"input_level1": "binding_affinity"},
+    "SARS_Cov_3C": {"input_level1": "binding_affinity"},
 }
 
 

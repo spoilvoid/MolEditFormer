@@ -2,6 +2,7 @@ import os
 import os.path as osp
 import numpy as np
 import copy
+import subprocess
 
 import torch
 import torch.nn as nn
@@ -736,3 +737,98 @@ def evaluate_latent_optimization_result(input_smi, output_smi, task_name, sim_th
         return success_flag, "success"
     else:
         return success_flag, ", ".join(reason_list) + "caused failure"
+
+
+def process_ligand_smiles(input_can_smi, output_dir, index=0):
+    """
+    Process ligand SMILES to .pdbqt file
+    """
+    filepath = osp.join(output_dir, f"smiles_{index}.pdbqt")
+
+    if not osp.exists(filepath):
+        try:
+            os.system(f"echo '{input_can_smi}' | obabel -i smi -o pdbqt -O {filepath} --gen3d")
+        except:
+            return False
+
+    return filepath
+
+
+def calculate_grid_box(pdbqt_file, buffer=5.0):
+    xs, ys, zs = [], [], []
+
+    with open(pdbqt_file, "r") as f:
+        for line in f:
+            if line.startswith("ATOM") or line.startswith("HETATM"):  # 解析原子坐标
+                xs.append(float(line[30:38].strip()))
+                ys.append(float(line[38:46].strip()))
+                zs.append(float(line[46:54].strip()))
+                print(float(line[30:38].strip()), float(line[38:46].strip()), float(line[46:54].strip()))
+
+    if not xs or not ys or not zs:
+        raise ValueError("No atom coordinates found in the PDBQT file")
+
+    center_x = (min(xs) + max(xs)) / 2
+    center_y = (min(ys) + max(ys)) / 2
+    center_z = (min(zs) + max(zs)) / 2
+
+    size_x = max(xs) - min(xs) + buffer
+    size_y = max(ys) - min(ys) + buffer
+    size_z = max(zs) - min(zs) + buffer
+
+    print(f"Center: x={center_x:.2f}, y={center_y:.2f}, z={center_z:.2f}")
+    print(f"Size: x={size_x:.2f}, y={size_y:.2f}, z={size_z:.2f}")
+
+    return center_x, center_y, center_z, size_x, size_y, size_z
+
+
+def run_vina(receptor, ligand, center_x, center_y, center_z, size_x, size_y, size_z, output="docking_result.pdbqt", log="docking.log"):
+    vina_cmd = [
+        "vina",
+        "--receptor", receptor,
+        "--ligand", ligand,
+        "--center_x", str(center_x),
+        "--center_y", str(center_y),
+        "--center_z", str(center_z),
+        "--size_x", str(size_x),
+        "--size_y", str(size_y),
+        "--size_z", str(size_z),
+        "--out", output,
+        "--log", log
+    ]
+    result = subprocess.run(vina_cmd, capture_output=True, text=True)
+    
+    if result.returncode != 0:
+        print("Vina failed:", result.stderr)
+        return None
+    return output
+
+
+def read_log(log_filepath):
+    best_affinity, best_rmsd_l_b, best_rmsd_u_b = None, None, None
+    with open(log_filepath) as log:
+        for line in log:
+            if line.strip().startswith("1"):  # 找到模式1的行
+                cols = line.split()
+                if len(cols) >= 2:
+                    best_affinity = float(cols[1])
+                    best_rmsd_l_b = float(cols[2])
+                    best_rmsd_u_b = float(cols[3])
+                    break
+    return best_affinity, best_rmsd_l_b, best_rmsd_u_b
+
+
+def autodock_vina_pipeline(ligand_pdbqt, output_filepath, log_filepath, protein_pdbqt, grid_box_config=None):
+    if grid_box_config is None:
+        center_x, center_y, center_z, size_x, size_y, size_z = calculate_grid_box(protein_pdbqt)
+    else:
+        center_x, center_y, center_z = grid_box_config["center_x"], grid_box_config["center_y"], grid_box_config["center_z"]
+        size_x, size_y, size_z = grid_box_config["size_x"], grid_box_config["size_y"], grid_box_config["size_z"]
+    
+    output_file = run_vina(protein_pdbqt, ligand_pdbqt, center_x, center_y, center_z, size_x, size_y, size_z, output=output_filepath, log=log_filepath)
+    best_affinity, best_rmsd_l_b, best_rmsd_u_b = read_log(log_filepath)
+
+    if output_file is None:
+        return "failed", "failed", "failed"
+    else:
+        return best_affinity, best_rmsd_l_b, best_rmsd_u_b

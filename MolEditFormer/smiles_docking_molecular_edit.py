@@ -1,0 +1,245 @@
+import os
+import os.path as osp
+import sys
+import math
+import time
+import argparse
+import numpy as np
+import pandas as pd
+import json
+from tqdm import tqdm
+from sklearn import preprocessing
+import multiprocessing
+from multiprocessing import Pool
+from functools import partial
+
+import rdkit
+from rdkit import Chem
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.optim as optim
+from torch.optim.lr_scheduler import _LRScheduler
+from torch.utils.data import DataLoader
+from torch.utils.tensorboard import SummaryWriter
+
+from transformers import AutoModel, AutoTokenizer
+
+from MolEditFormer.utils.basic_utils import get_local_time, seed_all, Logger
+from MolEditFormer.utils.molecule_edit_utils import process_ligand_smiles, calculate_grid_box, autodock_vina_pipeline
+from MolEditFormer.models import CLIP
+from MolEditFormer.datasets import MolPair_DockingSmiles_Test
+
+
+TARGET2ID_DICT = {
+    "COX2": "1pxx.pdbqt",
+    "DRD2": "6cm4.pdbqt",
+    "EGFR": "1m17.pdbqt",
+    "SARS_Cov_3C": "6lu7.pdbqt",
+}
+
+
+def autodock_vina_processors(index, ligand_smiles_list, output_dir, protein_filepath, grid_box_config):
+    ligand_smiles = ligand_smiles_list[index]
+    mol = Chem.MolFromSmiles(ligand_smiles)
+    if mol is None:
+        return "invalid smiles"
+    can_ligand_smiles = Chem.MolToSmiles(mol, canonical=True)
+
+    if not osp.join(output_dir, "ligands"):
+        os.makedirs(osp.join(output_dir, "ligands"))
+    ligand_filepath = process_ligand_smiles(can_ligand_smiles, osp.join(output_dir, "ligands"), index=index)
+    if ligand_filepath is False:
+        return "invalid ligand pdbqt"
+
+    if not osp.join(output_dir, "output"):
+        os.makedirs(osp.join(output_dir, "output"))
+    if not osp.join(output_dir, "log"):
+        os.makedirs(osp.join(output_dir, "log"))
+    output_filepath = osp.join(output_dir, "output", f"{index}.pdbqt")
+    log_filepath = osp.join(output_dir, "log", f"{index}.log")
+    best_affinity, _, _ = autodock_vina_pipeline(ligand_pdbqt=ligand_filepath, output_filepath=output_filepath, log_filepath=log_filepath, protein_pdbqt=protein_filepath, grid_box_config=grid_box_config)
+    if best_affinity == "failed":
+        return "invalid docking"
+    else:
+        return best_affinity
+        
+
+def main(args):
+    seed_all(args.seed)
+    device = torch.device("cuda:{}".format(args.gpu) if torch.cuda.is_available() else "cpu")
+    print("device:", device)
+    if args.dir_name == "":
+        result_save_dir = osp.join(args.store_dir, str(get_local_time()))
+    else:
+        result_save_dir = osp.join(args.store_dir, args.dir_name)
+    if not osp.exists(result_save_dir):
+        os.makedirs(result_save_dir)
+
+    fuse_args = {
+        "num_layers": args.num_layers,
+        "num_heads": args.num_heads,
+        "dropout": args.dropout,
+        "model_path": args.fuser_path,
+    }
+    mol_args = {
+        "molecule_type": args.molecule_type,
+        "smiles_emb_dim": args.smiles_emb_dim, 
+        "vocab_path" : args.smiles_vocab_path, 
+        "model_path": args.mol_model_path,
+    }
+    text_args = {
+        "text_emb_dim": args.text_emb_dim,
+        "max_seq_len": args.max_seq_len,
+        "tokenizer_dir": args.text_tokenizer_dir,
+        "model_path": args.text_model_path,
+    }
+
+    model = CLIP(
+        mol_branch=args.mol_branch,
+        text_branch=args.text_branch,
+        mode=args.model_mode,
+        device=device,
+        mol_args=mol_args,
+        text_args=text_args,
+        fuse_args=fuse_args,
+    ).to(device)
+    model.eval()
+
+    test_set = MolPair_DockingSmiles_Test(root=args.data_dir, template_path=args.template_path, target_name=args.target_name, mode=args.dataset_mode, version=args.version)
+    test_loader = DataLoader(test_set, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
+
+    original_smiles_list, result_smiles_list = [], []
+    for i_batch, sample_batched in tqdm(enumerate(test_loader), disable=False, total=len(test_loader)):
+        input_molecule_batched = sample_batched[0]
+        description_batched = sample_batched[1]
+
+        edited_molecule_batched = model.edit_molecules(batch_input_molecule=input_molecule_batched, batch_input_text=description_batched, sampling_alg=args.sampling_alg)
+
+        original_smiles_list.extend(input_molecule_batched)
+        result_smiles_list.extend(edited_molecule_batched)
+    
+    utils_dir = osp.join(args.data_dir, "evaluate_utils")
+    
+    input_prop_filepath = osp.join(utils_dir, f"{args.target_name}_input_prop.csv")
+    input_prop_df = pd.read_csv(input_prop_filepath)
+    input_prop_list = input_prop_df["binding_affinity"].tolist()
+
+    result_df = pd.DataFrame({
+        "input_smiles": original_smiles_list,
+        "output_smiles": result_smiles_list,
+        "input_binding_affinity": input_prop_list,
+    })
+    result_df.to_csv(osp.join(result_save_dir, f"{args.target_name}_results.csv"), index=False)
+    # protein_filepath = osp.join(utils_dir, TARGET2ID_DICT[args.target_name])
+    # center_x, center_y, center_z, size_x, size_y, size_z = calculate_grid_box(protein_filepath, buffer=args.buffer)
+    # grid_box_config = {
+    #     "center_x": center_x, "center_y": center_y, "center_z": center_z,
+    #     "size_x": size_x, "size_y": size_y, "size_z": size_z,
+    # }
+
+    # output2index_list = []
+    # docking_ligand_list = list(set(result_smiles_list))
+    # for output_smi in result_smiles_list:
+    #     output2index_list.append(docking_ligand_list.index(output_smi))
+
+
+    # worker = partial(autodock_vina_processors, ligand_smiles_list=docking_ligand_list, output_dir=result_save_dir, protein_filepath=protein_filepath, grid_box_config=grid_box_config)
+    # with Pool(args.num_workers) as p:
+    #     result_list = list(tqdm(p.imap(worker, list(range(len(docking_ligand_list)))), total=len(docking_ligand_list)))
+    
+    # output_binding_affinity_list, success_list, reason_list = [], [], []
+    # for index, input_prop in zip(output2index_list, input_prop_list):
+    #     output_smi = result_smiles_list[index]
+    #     result = result_list[index]
+    #     if result == "invalid smiles":
+    #         output_binding_affinity_list.append(None)
+    #         success_list.append(False)
+    #         reason_list.append("invalid smiles")
+    #     elif result == "invalid ligand pdbqt":
+    #         output_binding_affinity_list.append(None)
+    #         success_list.append(False)
+    #         reason_list.append("invalid ligand pdbqt")
+    #     elif result == "invalid docking":
+    #         output_binding_affinity_list.append(None)
+    #         success_list.append(False)
+    #         reason_list.append("invalid docking")
+    #     else:
+    #         output_prop = float(result)
+    #         if output_prop < input_prop:
+    #             output_binding_affinity_list.append(output_prop)
+    #             success_list.append(True)
+    #             reason_list.append("success")
+    #         else:
+    #             output_binding_affinity_list.append(output_prop)
+    #             success_list.append(False)
+    #             reason_list.append("low binding affinity")
+    
+    # result_df = pd.DataFrame({
+    #     "input_smiles": original_smiles_list,
+    #     "output_smiles": result_smiles_list,
+    #     "input_binding_affinity": input_prop_list,
+    #     "output_binding_affinity": output_binding_affinity_list,
+    #     "success": success_list,
+    #     "reason": reason_list
+    # })
+    # result_df.to_csv(osp.join(result_save_dir, f"task_{args.target_name}_results.csv"), index=False)
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    # dataset config
+    parser.add_argument("--data_dir", type=str, default="data/EditBenchmark/target")
+    parser.add_argument("--dataset_mode", type=str, default="random", choices=["random", "iterative"])
+    parser.add_argument("--template_path", type=str, default="template/template.txt")
+    parser.add_argument("--version", type=str, default="v1", choices=["v1", "v2", "v3", "v4"])
+    parser.add_argument("--target_name", type=str, default="COX2", choices=["COX2", "DRD2", "EGFR", "SARS_Cov_3C"])
+    # dataloader config
+    parser.add_argument("--batch_size", type=int, default=32)
+    parser.add_argument("--num_workers", type=int, default=8)
+    # inference config
+    parser.add_argument("--sampling_alg", type=str, default="greedy", choices=["greedy", "beam"])
+    parser.add_argument("--model_mode", type=str, default="edit", choices=["pretrain", "finetune", "reconstruct", "edit"])
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--gpu", type=int, default=1)
+    parser.add_argument("--buffer", type=int, default=5)
+    parser.add_argument("--tmp_dir", type=str, default="tmp")
+    # model config
+    parser.set_defaults(repr_frozen=False)
+    parser.add_argument("--mol_branch", dest='mol_branch', action='store_true')
+    parser.add_argument('--no_mol_branch', dest='mol_branch', action='store_false')
+    parser.set_defaults(mol_branch=True)
+    parser.add_argument("--text_branch", dest='text_branch', action='store_true')
+    parser.add_argument('--no_text_branch', dest='text_branch', action='store_false')
+    parser.set_defaults(text_branch=True)
+    # text branch config
+    parser.add_argument("--text_emb_dim", type=int, default=768)
+    parser.add_argument("--max_seq_len", type=int, default=512)
+    # smiles branch config
+    parser.add_argument('--smiles_model_type', type=str, default="MegaMolBART", choices=["MegaMolBART"])
+    parser.add_argument("--smiles_vocab_path", type=str, default="ckpt/MegaMolBART/bart_vocab.txt")
+    parser.add_argument("--smiles_emb_dim", type=int, default=256)
+    # load config
+    parser.add_argument('--text_tokenizer_dir', type=str, default='ckpt/SciBERT')
+    parser.add_argument('--text_model_path', type=str, default=None)
+    parser.add_argument('--mol_model_path', type=str, default='ckpt/MegaMolBART/model_weight.pth')
+    parser.add_argument('--fuser_path', type=str, default=None)
+    # save config
+    parser.add_argument("--store_dir", type=str, default="ckpt/MolEditFormer/docking_inference")
+    parser.add_argument("--dir_name", type=str, default="")
+    # fuser config
+    parser.add_argument("--num_layers", type=int, default=4)
+    parser.add_argument("--num_heads", type=int, default=8)
+    parser.add_argument("--dropout", type=float, default=0.1)
+
+    args = parser.parse_args()
+    args.molecule_type = "SMILES"
+    args.data_source = "MolPair_Docking"
+
+    start = time.perf_counter()
+    main(args)
+    
+
+    end = time.perf_counter()
+    print("time consuming {:.2f}".format(end - start))
