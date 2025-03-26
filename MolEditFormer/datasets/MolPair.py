@@ -429,7 +429,7 @@ class MolPair_DockingSmiles(Dataset):
                     match = re.search(r'smiles2_level(\d+)', key)
                     if match:
                         input_prop_num = match.group(1)
-                        task_description = re.sub(r'\${output_level'+input_prop_num+'}', value, task_description)
+                        task_description = re.sub(r'\${output_level'+input_prop_num+'}', "another level", task_description)
             
             self.description_list.append(normal_description_dict[row["smiles1"]] + " " + docking_description_dict[row["smiles1"]] + " " + task_description)
             self.input_smiles_list.append(row["smiles1"])

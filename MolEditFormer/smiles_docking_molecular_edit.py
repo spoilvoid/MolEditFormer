@@ -47,15 +47,15 @@ def autodock_vina_processors(index, ligand_smiles_list, output_dir, protein_file
         return "invalid smiles"
     can_ligand_smiles = Chem.MolToSmiles(mol, canonical=True)
 
-    if not osp.join(output_dir, "ligands"):
+    if osp.exists(osp.join(output_dir, "ligands")):
         os.makedirs(osp.join(output_dir, "ligands"))
     ligand_filepath = process_ligand_smiles(can_ligand_smiles, osp.join(output_dir, "ligands"), index=index)
     if ligand_filepath is False:
         return "invalid ligand pdbqt"
 
-    if not osp.join(output_dir, "output"):
+    if not osp.exists(osp.join(output_dir, "output")):
         os.makedirs(osp.join(output_dir, "output"))
-    if not osp.join(output_dir, "log"):
+    if not osp.exists(osp.join(output_dir, "log")):
         os.makedirs(osp.join(output_dir, "log"))
     output_filepath = osp.join(output_dir, "output", f"{index}.pdbqt")
     log_filepath = osp.join(output_dir, "log", f"{index}.log")
@@ -124,12 +124,18 @@ def main(args):
     
     input_prop_filepath = osp.join(utils_dir, f"{args.target_name}_input_prop.csv")
     input_prop_df = pd.read_csv(input_prop_filepath)
+    input_smiles_list = input_prop_df["smiles"].tolist()
     input_prop_list = input_prop_df["binding_affinity"].tolist()
+
+    original_prop_list = []
+    for original_smi in original_smiles_list:
+        index = input_smiles_list.index(original_smi)
+        original_prop_list.append(input_prop_list[index])
 
     result_df = pd.DataFrame({
         "input_smiles": original_smiles_list,
         "output_smiles": result_smiles_list,
-        "input_binding_affinity": input_prop_list,
+        "input_binding_affinity": original_prop_list,
     })
     result_df.to_csv(osp.join(result_save_dir, f"{args.target_name}_results.csv"), index=False)
     # protein_filepath = osp.join(utils_dir, TARGET2ID_DICT[args.target_name])
