@@ -1,9 +1,13 @@
-import networkx as nx
+import random
 import numpy as np
+import networkx as nx
+
 import torch
-from rdkit import Chem
+
 from torch_geometric.data import Data
 from ogb.utils.features import atom_to_feature_vector, bond_to_feature_vector, allowable_features
+
+from rdkit import Chem
 
 
 DESCRIPTION_MODE = ["full", "main", "expand"]
@@ -293,6 +297,23 @@ def mol_to_graph_data_obj_simple(mol):
     data = Data(x=x, edge_index=edge_index, edge_attr=edge_attr)
 
     return data
+
+
+def shuffle_atom_order(smiles):
+    """ shuffle atom order to get un-canonical mol object 
+    :param smiles: str object of SMILES
+    :return: rdkit mol object """
+    mol = Chem.MolFromSmiles(smiles)
+    if mol is None:
+        raise ValueError(f"Invalid SMILES string: {smiles}")
+    atom_order = list(range(mol.GetNumAtoms()))
+    random.shuffle(atom_order)
+    
+    mol_copy = Chem.RenumberAtoms(mol, atom_order)
+
+    shuffled_smiles = Chem.MolToSmiles(mol_copy, canonical=False)
+
+    return shuffled_smiles
 
 
 def graph_data_obj_to_mol_simple(data_x, data_edge_index, data_edge_attr):

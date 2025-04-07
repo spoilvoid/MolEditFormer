@@ -20,7 +20,8 @@ from transformers import AutoModel, AutoTokenizer
 
 from MolEditFormer.utils.basic_utils import get_local_time, seed_all, Logger
 from MolEditFormer.models import CLIP
-from MolEditFormer.datasets import PubChemEdit, PubChemEdit_ZINC250k, MolPair_SingleGraph, MolGraphDataset
+# from MolEditFormer.datasets import PubChemEdit, PubChemEdit_ZINC250k
+from MolEditFormer.datasets import PubChemEdit_ZINC250k
 
 
 class epoch_based_WarmupCosineLR(_LRScheduler):
@@ -107,7 +108,17 @@ def main(args):
     ).to(device)
     model.train()
 
-    train_set = PubChemEdit_ZINC250k(args.data_dir, mode=args.dataset_mode, can_smiles=args.can_smiles, version=args.version)
+    if args.mixed:
+        mixed_config = {
+            "can2can_ratio": args.can2can_ratio,
+            "non2can_ratio": args.non2can_ratio,
+            "non2non_ratio": args.non2non_ratio,
+        }
+        if mixed_config["non2can_ratio"] + mixed_config["non2non_ratio"]  + mixed_config["can2can_ratio"] != 1.0:
+            raise ValueError("Invalid mixed config")
+    else:
+        mixed_config = None
+    train_set = PubChemEdit_ZINC250k(args.data_dir, mode=args.dataset_mode, version=args.version, mixed=args.mixed, mixed_config=mixed_config)
     train_loader = DataLoader(train_set, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
 
     model_param_group = [
@@ -137,10 +148,11 @@ def main(args):
     for epoch_id in range(args.start_epoch, args.epoch_num):
         epoch_loss = 0.0
         for i_batch, sample_batched in tqdm(enumerate(train_loader), disable=False, total=len(train_loader)):
-            molecule_batched = sample_batched[0]
-            description_batched = sample_batched[1]
+            encoder_input_molecule_batched = sample_batched[0]
+            decoder_input_molecule_batched = sample_batched[1]
+            description_batched = sample_batched[2]
             
-            cl_loss, mask_loss = model(molecule_batched, description_batched)
+            cl_loss, mask_loss = model(encoder_input_molecule_batched, description_batched, batch_output_molecule=decoder_input_molecule_batched)
             all_loss = cl_loss + args.alpha * mask_loss
             optimizer.zero_grad()
             torch.cuda.empty_cache()
@@ -180,7 +192,10 @@ if __name__ == "__main__":
     parser.add_argument("--data_dir", type=str, default="data/PubChemEdit_ZINC250k")
     parser.add_argument("--dataset_mode", type=str, default="main", choices=["full", "main", "expand"])
     parser.add_argument("--version", type=str, default="v1", choices=["v1", "v2", "v3", "v4"])
-    parser.add_argument("--can_smiles", action="store_true")
+    parser.add_argument("--mixed", action="store_true")
+    parser.add_argument("--can2can_ratio", type=float, default=1.0)
+    parser.add_argument("--non2can_ratio", type=float, default=0.0)
+    parser.add_argument("--non2non_ratio", type=float, default=0.0)
     # dataloader config
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--num_workers", type=int, default=8)

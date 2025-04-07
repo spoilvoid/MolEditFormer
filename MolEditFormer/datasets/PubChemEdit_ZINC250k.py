@@ -1,4 +1,7 @@
 import os
+import os.path as osp
+import random
+import numpy as np
 import gzip
 import json
 import pandas as pd
@@ -14,48 +17,44 @@ from torch.utils.data import Dataset
 from MolEditFormer.datasets import dataset_utils
 from MolEditFormer.datasets.dataset_utils import DESCRIPTION_MODE, VERSION
 
-
 class PubChemEdit_ZINC250k(Dataset):
-    def __init__(self, root, mode="full", can_smiles=True, version="v1"):
+    def __init__(self, root, mode="full", version="v1", mixed=False, mixed_config=None):
         if mode not in DESCRIPTION_MODE:
             raise ValueError(f"Invalid mode: {mode}, choose from {DESCRIPTION_MODE}")
         self.mode = mode
         if version not in VERSION:
             raise ValueError(f"Invalid version: {version}, choose from {VERSION}")
         if version in ["v1", "v2"]:
-            self.root = osp.join(self.root, "valued_"+version)
+            self.root = osp.join(root, "valued_"+version)
         elif version in ["v3", "v4"]:
-            self.root = osp.join(self.root, "tagged_"+version)
-        self.can_smiles = can_smiles
+            self.root = osp.join(root, "tagged_"+version)
+        self.mixed = mixed
+        self.mixed_config = mixed_config
 
         self.PubchemEdit_filepath = os.path.join(self.root, "raw", "PubChemEdit.json")
         self.additional_ZINC250k_filepath = os.path.join(self.root, "raw", "additional_ZINC250k.csv")
 
         self.description_filepath = os.path.join(self.root, self.mode, "processed_description.csv")
-        self.SMILES_filepath = os.path.join(self.root, self.mode, "processed_SMILES.csv")
         if not os.path.exists(os.path.join(self.root, self.mode)):
             os.makedirs(os.path.join(self.root, self.mode))
         
-        if os.path.exists(self.description_filepath) and os.path.exists(self.SMILES_filepath):
-            SMILES_df = pd.read_csv(self.SMILES_filepath)
+        if os.path.exists(self.description_filepath):
             description_df = pd.read_csv(self.description_filepath)
-            self.SMILES_list = SMILES_df["smiles"].tolist()
+            self.encoder_input_SMILES_list = description_df["encoder_input_smiles"].tolist()
+            self.decoder_input_SMILES_list = description_df["decoder_input_smiles"].tolist()
             self.description_list = description_df["description"].tolist()
         else:
             self.process()
 
     def process(self):
-        self.CID_list, self.description_list, self.SMILES_list  = [], [], []
+        self.CID_list, self.description_list, self.encoder_input_SMILES_list, self.decoder_input_SMILES_list  = [], [], [], []
+        raw_smiles_list = []
         print("Processing PubChemEdit")
         with open(self.PubchemEdit_filepath) as file:
             PubChemEdit_data = json.load(file)
         file.close()
         for item in tqdm(PubChemEdit_data):
-            self.CID_list.append(int(item["CID"]))
-            if self.can_smiles:
-                self.SMILES_list.append(item["RDKit_CanSmiles"])
-            else:
-                self.SMILES_list.append(item["RDKit_IsoSmiles"])
+            raw_smiles_list.append(item["RDKit_IsoSmiles"])
             
             if self.mode == "full":
                 raw_descriptions = [desc for label, desc in item["Description"].items() if desc != "" and label not in ["Pharmacology/Biochemistry", "Others"]]
@@ -67,20 +66,38 @@ class PubChemEdit_ZINC250k(Dataset):
         
         print("Processing additional ZINC250k")
         additional_ZINC250k_df = pd.read_csv(self.additional_ZINC250k_filepath)
-        self.CID_list.extend(len(additional_ZINC250k_df) * [-1])
-        self.SMILES_list.extend(additional_ZINC250k_df["smiles"].tolist())
+        raw_smiles_list.extend(additional_ZINC250k_df["smiles"].tolist())
         self.description_list.extend(additional_ZINC250k_df["description"].tolist())
-        
-        SMILES_df = pd.DataFrame({"CID": self.CID_list, "smiles": self.SMILES_list})
-        SMILES_df.to_csv(self.SMILES_filepath, index=None)
 
-        description_df = pd.DataFrame({"CID": self.CID_list, "description": self.description_list})
+        print("Processing mixed config for SMILES")
+        if self.mixed:
+            mix_num = int(len(raw_smiles_list) * (self.mixed_config["non2can_ratio"] + self.mixed_config["non2non_ratio"]))
+            non2can_num = int(len(raw_smiles_list) * self.mixed_config["non2can_ratio"])
+            mix_indices = random.sample(range(len(raw_smiles_list)), mix_num)
+            non2can_indices = mix_indices[:non2can_num]
+            non2non_indices = mix_indices[non2can_num:]
+            for idx in tqdm(range(len(raw_smiles_list))):
+                if idx not in mix_indices:
+                    self.encoder_input_SMILES_list.append(raw_smiles_list[idx])
+                    self.decoder_input_SMILES_list.append(raw_smiles_list[idx])
+                elif idx in non2can_indices:
+                    self.encoder_input_SMILES_list.append(dataset_utils.shuffle_atom_order(raw_smiles_list[idx]))
+                    self.decoder_input_SMILES_list.append(raw_smiles_list[idx])
+                elif idx in non2non_indices:
+                    self.encoder_input_SMILES_list.append(dataset_utils.shuffle_atom_order(raw_smiles_list[idx]))
+                    self.decoder_input_SMILES_list.append(dataset_utils.shuffle_atom_order(raw_smiles_list[idx]))
+        else:
+            self.encoder_input_SMILES_list = raw_smiles_list
+            self.decoder_input_SMILES_list = raw_smiles_list
+
+        description_df = pd.DataFrame({"encoder_input_smiles": self.encoder_input_SMILES_list, "decoder_input_smiles": self.decoder_input_SMILES_list, "description": self.description_list})
         description_df.to_csv(self.description_filepath, index=None)
 
     def __getitem__(self, idx):
-        SMILES = self.SMILES_list[idx]
+        encoder_input_SMILES = self.encoder_input_SMILES_list[idx]
+        decoder_input_SMILES = self.decoder_input_SMILES_list[idx]
         description  = self.description_list[idx]
-        return SMILES, description
+        return encoder_input_SMILES, decoder_input_SMILES, description
 
     def __len__(self):
-        return len(self.SMILES_list)
+        return len(self.encoder_input_SMILES_list)

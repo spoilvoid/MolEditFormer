@@ -682,7 +682,7 @@ def evaluate_molecular_edit_result(input_smi, output_smi, task_id):
     if success_flag:
         return success_flag, "success"
     else:
-        return success_flag, ", ".join(reason_list) + "caused failure"
+        return success_flag, ", ".join(reason_list) + " caused failure"
 
 
 def evaluate_latent_optimization_result(input_smi, output_smi, task_name, sim_threshold=0.4):
