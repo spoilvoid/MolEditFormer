@@ -6,21 +6,20 @@ import time
 import argparse
 import numpy as np
 from tqdm import tqdm
-from multiprocessing import Pool
+from sklearn import preprocessing
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.optim.lr_scheduler import _LRScheduler
-from torch.utils.data import random_split, DataLoader
+from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
 from transformers import AutoModel, AutoTokenizer
 
 from MolEditFormer.utils.basic_utils import get_local_time, seed_all, Logger
-from MolEditFormer.utils.molecule_edit_utils import get_can_smiles
-from MolEditFormer.models import CLIP
+from MolEditFormer.models import CLIP_pretrain_momentum
 # from MolEditFormer.datasets import PubChemEdit, PubChemEdit_ZINC250k
 from MolEditFormer.datasets import PubChemEdit_ZINC250k
 
@@ -81,6 +80,8 @@ def main(args):
         "CL_loss": args.SSL_loss,
         "CL_neg_samples": args.CL_neg_samples,
         "T": args.T,
+        "momentum": args.momentum,
+        "alpha": args.alpha,
         "normalize": args.normalize,
         "mol2latent_path": None, 
         "text2latent_path": None,
@@ -98,7 +99,7 @@ def main(args):
         "model_path": args.text_model_path,
     }
 
-    model = CLIP(
+    model = CLIP_pretrain_momentum(
         mol_branch=args.mol_branch,
         text_branch=args.text_branch,
         mode=args.model_mode,
@@ -107,7 +108,7 @@ def main(args):
         text_args=text_args,
         CL_args=CL_args,
     ).to(device)
-
+    model.train()
 
     if args.mixed:
         mixed_config = {
@@ -119,20 +120,8 @@ def main(args):
             raise ValueError("Invalid mixed config")
     else:
         mixed_config = None
-
-    if args.validation_ratio == 0:
-        train_set = PubChemEdit_ZINC250k(args.data_dir, mode=args.dataset_mode, version=args.version, mixed=args.mixed, mixed_config=mixed_config)
-        train_loader = DataLoader(train_set, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
-    elif 0 < args.validation_ratio < 1:
-        dataset = PubChemEdit_ZINC250k(args.data_dir, mode=args.dataset_mode, version=args.version, mixed=args.mixed, mixed_config=mixed_config)
-        dataset_size = len(dataset)
-        val_size = int(dataset_size * args.validation_ratio)
-        train_size = dataset_size - val_size
-        train_set, val_set = random_split(dataset, [train_size, val_size])
-        train_loader = DataLoader(train_set, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
-        val_loader = DataLoader(val_set, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
-    else:
-        raise ValueError("Invalid validation ratio")
+    train_set = PubChemEdit_ZINC250k(args.data_dir, mode=args.dataset_mode, version=args.version, mixed=args.mixed, mixed_config=mixed_config)
+    train_loader = DataLoader(train_set, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
 
     model_param_group = [
         {"params": model.text_model.parameters(), "lr": args.text_lr},
@@ -159,8 +148,6 @@ def main(args):
 
     optimal_loss = args.loss_threshold
     for epoch_id in range(args.start_epoch, args.epoch_num):
-        # train step for 1 epoch
-        model.train()
         epoch_loss = 0.0
         for i_batch, sample_batched in tqdm(enumerate(train_loader), disable=False, total=len(train_loader)):
             encoder_input_molecule_batched = sample_batched[0]
@@ -168,7 +155,7 @@ def main(args):
             description_batched = sample_batched[2]
             
             cl_loss, mask_loss = model(encoder_input_molecule_batched, description_batched, batch_output_molecule=decoder_input_molecule_batched)
-            all_loss = cl_loss + args.alpha * mask_loss
+            all_loss = cl_loss + args.adjust_ratio * mask_loss
             optimizer.zero_grad()
             torch.cuda.empty_cache()
             all_loss.backward()
@@ -196,37 +183,6 @@ def main(args):
         if epoch_loss < optimal_loss:
             optimal_loss = epoch_loss
             model.save_model(model_save_dir, "best", save_config)
-        
-        # validation step for 1 epoch
-        if 0 < args.validation_ratio < 1:
-            model.eval()
-            val_loss = 0.0
-            input_smiles_list, reconstruct_smiles_list = [], []
-            for i_batch, sample_batched in tqdm(enumerate(val_loader), disable=False, total=len(val_loader)):
-                encoder_input_molecule_batched = sample_batched[0]
-                decoder_input_molecule_batched = sample_batched[1]
-                description_batched = sample_batched[2]
-                
-                cl_loss, mask_loss = model(encoder_input_molecule_batched, description_batched, batch_output_molecule=decoder_input_molecule_batched)
-                all_loss = cl_loss + args.alpha * mask_loss
-                loss = round((all_loss.detach().clone()).cpu().item(), 4)
-                val_loss += loss / len(val_loader)
-
-                input_smiles_list.extend(encoder_input_molecule_batched)
-                reconstruct_smiles_list.extend(model.reconstruct_molecules(encoder_input_molecule_batched))
-
-            logger.log("{}th epoch validation loss:{}".format(epoch_id + 1, val_loss))
-            writer.add_scalar("Validation_Loss/epoch", val_loss, epoch_id + 1)
-
-            hit_count = 0
-            with Pool(args.num_workers) as p:
-                can_input_smiles_list = list(tqdm(p.imap(get_can_smiles, input_smiles_list), total=len(input_smiles_list)))
-                can_reconstruct_smiles_list = list(tqdm(p.imap(get_can_smiles, reconstruct_smiles_list), total=len(reconstruct_smiles_list)))
-            for can_input_smiles, can_reconstruct_smiles in zip(can_input_smiles_list, can_reconstruct_smiles_list):
-                if can_input_smiles == can_reconstruct_smiles:
-                    hit_count += 1
-            hit_ratio = hit_count / len(input_smiles_list)
-            logger.log("{}th epoch validation reconstruct ratio:{}".format(epoch_id + 1, hit_ratio))
 
 
 if __name__ == "__main__":
@@ -242,7 +198,6 @@ if __name__ == "__main__":
     parser.add_argument("--can2can_ratio", type=float, default=1.0)
     parser.add_argument("--non2can_ratio", type=float, default=0.0)
     parser.add_argument("--non2non_ratio", type=float, default=0.0)
-    parser.add_argument("--validation_ratio", type=float, default=0.0)
     # dataloader config
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--num_workers", type=int, default=8)
@@ -289,14 +244,16 @@ if __name__ == "__main__":
     parser.add_argument("--save_freq", type=int, default=4000)
     parser.add_argument("--loss_threshold", type=float, default=sys.maxsize)
     # contrastive SSL config
-    parser.add_argument("--SSL_loss", type=str, default="EBM_NCE", choices=["EBM_NCE", "InfoNCE"])
+    parser.add_argument("--SSL_loss", type=str, default="EBM_NCE", choices=["EBM_NCE", "InfoNCE", "momentum"])
     parser.add_argument("--CL_neg_samples", type=int, default=1)
     parser.add_argument("--T", type=float, default=0.1)
+    parser.add_argument("--momentum", type=float, default=0.995)
+    parser.add_argument("--alpha", type=float, default=0.4)
     parser.add_argument('--normalize', dest='normalize', action='store_true')
     parser.add_argument('--no_normalize', dest='normalize', action='store_false')
     parser.set_defaults(normalize=True)
     # loss config
-    parser.add_argument("--alpha", type=float, default=0.1)
+    parser.add_argument("--adjust_ratio", type=float, default=1)
 
     args = parser.parse_args()
     args.molecule_type = "SMILES"

@@ -13,7 +13,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.optim.lr_scheduler import _LRScheduler
-from torch.utils.data import DataLoader
+from torch.utils.data import random_split, DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
 from transformers import AutoModel, AutoTokenizer
@@ -102,10 +102,20 @@ def main(args):
         text_args=text_args,
         fuse_args=fuse_args,
     ).to(device)
-    model.train()
 
-    train_set = MolPair_PairSmiles(args.data_dir, args.template_path, mode=args.dataset_mode, max_num_pairs_per_task=args.max_num_pairs_per_task, version=args.version)
-    train_loader = DataLoader(train_set, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
+    if args.validation_ratio == 0:
+        train_set = MolPair_PairSmiles(args.data_dir, args.template_path, mode=args.dataset_mode, max_num_pairs_per_task=args.max_num_pairs_per_task, version=args.version)
+        train_loader = DataLoader(train_set, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
+    elif 0 < args.validation_ratio < 1:
+        dataset = MolPair_PairSmiles(args.data_dir, args.template_path, mode=args.dataset_mode, max_num_pairs_per_task=args.max_num_pairs_per_task, version=args.version)
+        dataset_size = len(dataset)
+        val_size = int(dataset_size * args.validation_ratio)
+        train_size = dataset_size - val_size
+        train_set, val_set = random_split(dataset, [train_size, val_size])
+        train_loader = DataLoader(train_set, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
+        val_loader = DataLoader(val_set, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
+    else:
+        raise ValueError("Invalid validation ratio")
 
     model_param_group = [
         {"params": model.text_model.parameters(), "lr": args.text_lr},
@@ -126,9 +136,10 @@ def main(args):
     else:
         raise ValueError("Invalid warmup choice")
 
-    nan_flag = False
     optimal_loss = args.loss_threshold
     for epoch_id in range(args.start_epoch, args.epoch_num):
+        # train step for 1 epoch
+        model.train()
         epoch_loss = 0.0
         for i_batch, sample_batched in tqdm(enumerate(train_loader), disable=False, total=len(train_loader)):
             input_molecule_batched = sample_batched[0]
@@ -137,13 +148,6 @@ def main(args):
             
             _, mask_loss = model(input_molecule_batched, description_batched, batch_output_molecule=output_molecule_batched)
             all_loss = mask_loss
-            
-            if all_loss == "nan_error":
-                print("nan_error")
-                print("data:", input_molecule_batched, description_batched, output_molecule_batched)
-                nan_flag = True
-                model.save_model(model_save_dir, f"nan_model", save_config)
-                break
 
             optimizer.zero_grad()
             torch.cuda.empty_cache()
@@ -162,9 +166,6 @@ def main(args):
                     model.save_model(model_save_dir, f"epoch{epoch_id}_batch{i_batch+1}", save_config)
             epoch_loss += loss / len(train_loader)
 
-        if nan_flag:
-            break
-
         if args.warmup_choice == "epoch":
             scheduler.step()
 
@@ -174,6 +175,24 @@ def main(args):
         if epoch_loss < optimal_loss:
             optimal_loss = epoch_loss
             model.save_model(model_save_dir, "best", save_config)
+        
+        # validation step for 1 epoch
+        if 0 < args.validation_ratio < 1:
+            model.eval()
+            val_loss = 0.0
+            for i_batch, sample_batched in tqdm(enumerate(val_loader), disable=False, total=len(val_loader)):
+                input_molecule_batched = sample_batched[0]
+                output_molecule_batched = sample_batched[1]
+                description_batched = sample_batched[2]
+                
+                _, mask_loss = model(input_molecule_batched, description_batched, batch_output_molecule=output_molecule_batched)
+                all_loss = mask_loss
+
+                loss = round((all_loss.detach().clone()).cpu().item(), 4)
+                val_loss += loss / len(val_loader)
+
+            logger.log("{}th epoch validation loss:{}".format(epoch_id + 1, val_loss))
+            writer.add_scalar("Validation_Loss/epoch", val_loss, epoch_id + 1)
 
 
 if __name__ == "__main__":
@@ -187,6 +206,7 @@ if __name__ == "__main__":
     parser.add_argument("--version", type=str, default="v1", choices=["v1", "v2", "v3", "v4"])
     parser.add_argument("--dataset_mode", type=str, default="main", choices=["full", "main", "expand"])
     parser.add_argument("--max_num_pairs_per_task", type=int, default=25000)
+    parser.add_argument("--validation_ratio", type=float, default=0.0)
     # dataloader config
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--num_workers", type=int, default=8)
