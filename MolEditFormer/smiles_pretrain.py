@@ -227,6 +227,7 @@ def main(args):
                     hit_count += 1
             hit_ratio = hit_count / len(input_smiles_list)
             logger.log("{}th epoch validation reconstruct ratio:{}".format(epoch_id + 1, hit_ratio))
+            writer.add_scalar("Validation_Reconstruct_Ratio/epoch", hit_ratio, epoch_id + 1)
 
 
 if __name__ == "__main__":

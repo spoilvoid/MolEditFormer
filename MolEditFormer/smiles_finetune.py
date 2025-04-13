@@ -6,7 +6,8 @@ import time
 import argparse
 import numpy as np
 from tqdm import tqdm
-from sklearn import preprocessing
+import re
+from multiprocessing import Pool
 
 import torch
 import torch.nn as nn
@@ -19,9 +20,36 @@ from torch.utils.tensorboard import SummaryWriter
 from transformers import AutoModel, AutoTokenizer
 
 from MolEditFormer.utils.basic_utils import get_local_time, seed_all, Logger
+from MolEditFormer.utils.molecule_edit_utils import evaluate_molecular_edit_result
 from MolEditFormer.models import CLIP
 from MolEditFormer.datasets import MolPair_PairGraph, MolPair_PairSmiles
+from MolEditFormer.datasets.dataset_utils import TEXT_REQUIREMENTS_V1, TEXT_REQUIREMENTS_V2, TEXT_REQUIREMENTS_V3, TEXT_REQUIREMENTS_V4
 
+
+def get_task_id_from_description(description, version):
+    if version == "v1":
+        requirement_format_dict = TEXT_REQUIREMENTS_V1
+    elif version == "v2":
+        requirement_format_dict = TEXT_REQUIREMENTS_V2
+    elif version == "v3":
+        requirement_format_dict = TEXT_REQUIREMENTS_V3
+    elif version == "v4":
+        requirement_format_dict = TEXT_REQUIREMENTS_V4
+    
+    for task_id in range(201, 207):
+        requirement_format = requirement_format_dict[task_id]
+        pattern = requirement_format.replace("${input_level1}", "(.*?)").replace("${output_level1}", "(.*?)").replace("${input_level2}", "(.*?)").replace("${output_level2}", "(.*?)")
+        match = re.search(pattern, description)
+        if match:
+            return task_id
+    
+    for task_id in range(101, 109):
+        requirement_format = requirement_format_dict[task_id]
+        pattern = requirement_format.replace("${input_level1}", "(.*?)").replace("${output_level1}", "(.*?)").replace("${input_level2}", "(.*?)").replace("${output_level2}", "(.*?)")
+        match = re.search(pattern, description)
+        if match:
+            return task_id
+        
 
 class epoch_based_WarmupCosineLR(_LRScheduler):
     def __init__(self, optimizer, warmup_epochs, total_epochs, last_epoch=-1):
@@ -180,6 +208,7 @@ def main(args):
         if 0 < args.validation_ratio < 1:
             model.eval()
             val_loss = 0.0
+            task_id_list, input_smiles_list, edit_smiles_list = [], [], []
             for i_batch, sample_batched in tqdm(enumerate(val_loader), disable=False, total=len(val_loader)):
                 input_molecule_batched = sample_batched[0]
                 output_molecule_batched = sample_batched[1]
@@ -188,11 +217,25 @@ def main(args):
                 _, mask_loss = model(input_molecule_batched, description_batched, batch_output_molecule=output_molecule_batched)
                 all_loss = mask_loss
 
+                task_id_list.extend([get_task_id_from_description(description, args.version) for description in description_batched])
+                input_smiles_list.extend(input_molecule_batched)
+                edit_smiles_list.extend(model.edit_molecules(batch_input_molecule=input_molecule_batched, batch_input_text=description_batched))
+
                 loss = round((all_loss.detach().clone()).cpu().item(), 4)
                 val_loss += loss / len(val_loader)
 
             logger.log("{}th epoch validation loss:{}".format(epoch_id + 1, val_loss))
             writer.add_scalar("Validation_Loss/epoch", val_loss, epoch_id + 1)
+
+            hit_count = 0
+            for task_id, input_smiles, edit_smiles in zip(task_id_list, input_smiles_list, edit_smiles_list):
+                is_success, reason = evaluate_molecular_edit_result(input_smi=input_smiles, edit_smiles=edit_smiles, task_id=task_id)
+                if is_success:
+                    hit_count += 1
+            hit_rate = hit_count / len(task_id_list)
+            logger.log("{}th epoch validation random hit rate:{}".format(epoch_id + 1, hit_rate))
+            writer.add_scalar("Validation_Random_HitRate/epoch", hit_rate, epoch_id + 1)
+
 
 
 if __name__ == "__main__":

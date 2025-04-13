@@ -89,6 +89,7 @@ def main(args):
     else:
         threshold_list = [0 for _ in range(len(HARD_THRESHOLD_DICT[args.task_id]))]
         result_filepath = osp.join(result_save_dir, f"task_{args.task_id}_soft_threshold_results.json")
+        
     if args.dataset_mode in ["random", "iterative"]:
         distinct_input_smiles_list = list(set(original_smiles_list))
         result_dict = {input_smi: {"invalid":[], "unsatisfied":[], "successful":[]} for input_smi in distinct_input_smiles_list}
