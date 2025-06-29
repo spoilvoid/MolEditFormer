@@ -35,6 +35,8 @@ TEXT_REQUIREMENTS_V1 = {
     "DRD2": "increase the binding affinity for the target",
     "EGFR": "increase the binding affinity for the target",
     "SARS_Cov_3C": "increase the binding affinity for the target",
+    "2QBR_active2active": "maintain pIC50 for the target at least 6.5 with certain activity while ${task_requirement}",
+    "2QBR_other": "increase pIC50 for the target to at least 6.5",
 }
 TEXT_REQUIREMENTS_V2 = {
     "101": "more soluble in water",
@@ -79,6 +81,8 @@ TEXT_REQUIREMENTS_V3 = {
     "DRD2": "increase the binding affinity for the target from ${input_level1} to ${output_level1}",
     "EGFR": "increase the binding affinity for the target from ${input_level1} to ${output_level1}",
     "SARS_Cov_3C": "increase the binding affinity for the target from ${input_level1} to ${output_level1}",
+    "2QBR_active2active": "maintain pIC50 for the target at least ${output_level1} with certain activity while ${task_requirement}",
+    "2QBR_other": "increase pIC50 for the target from ${input_level1} to ${output_level1}",
 }
 TEXT_REQUIREMENTS_V4 = {
     "101": "",
@@ -166,6 +170,23 @@ LEVEL_LABELS_PROP_NAME = {
         (4, 6): "high PlogP",
         (6, "+inf"): "very high PlogP",
     },
+    "vina_affinity": {
+        ("-inf", -11): "very high binding affinity",
+        (-11, -9): "high binding affinity",
+        (-9, -7): "moderate binding affinity",
+        (-7, -5): "low binding affinity",
+        (-5, "+inf"): "almost no binding affinity",
+    },
+    "pIC50": {
+        ("-inf", 4.5): "very low pIC50 with certain inactivity",
+        (4.5, 5): "low pIC50 with certain inactivity",
+        (5, 5.5): "slightly low pIC50 with certain inactivity",
+        (5.5, 6): "moderate pIC50 with activity uncertain but leaning toward inactive",
+        (6, 6.5): "moderate pIC50 with activity uncertain but leaning toward active",
+        (6.5, 7): "slightly high pIC50 with certain activity",
+        (7, 7.5): "high pIC50 with certain activity",
+        (7.5, "+inf"): "very high pIC50 with certain activity",
+    },
 }
 LEVEL_LABELS_PROP_EXPLANATION = {
     "QED": {
@@ -231,6 +252,23 @@ LEVEL_LABELS_PROP_EXPLANATION = {
         (4, 6): "penalized insoluble in water",
         (6, "+inf"): "practically penalized insoluble in water",
     },
+    "vina_affinity": {
+        ("-inf", -11): "very high binding to the target",
+        (-11, -9): "high binding to the target",
+        (-9, -7): "moderate binding to the target",
+        (-7, -5): "low binding to the target",
+        (-5, "+inf"): "almost no binding to the target",
+    },
+    "pIC50": {
+        ("-inf", 4.5): "very low binding affinity with certain inactivity",
+        (4.5, 5): "low binding affinity with certain inactivity",
+        (5, 5.5): "slightly low binding affinity with certain inactivity",
+        (5.5, 6): "moderate binding affinity with activity uncertain but leaning toward inactive",
+        (6, 6.5): "moderate binding affinity with activity uncertain but leaning toward active",
+        (6.5, 7): "slightly high binding affinity with certain activity",
+        (7, 7.5): "high binding affinity with certain activity",
+        (7.5, "+inf"): "very high binding affinity with certain activity",
+    },
 }
 TASK_REFERENCE = {
     "101": {"input_level1": "logP"},
@@ -253,6 +291,7 @@ TASK_REFERENCE = {
     "DRD2": {"input_level1": "binding_affinity"},
     "EGFR": {"input_level1": "binding_affinity"},
     "SARS_Cov_3C": {"input_level1": "binding_affinity"},
+    "2QBR": {"input_level1": "pIC50"},
 }
 
 

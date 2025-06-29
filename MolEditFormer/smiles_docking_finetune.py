@@ -20,7 +20,7 @@ from transformers import AutoModel, AutoTokenizer
 
 from MolEditFormer.utils.basic_utils import get_local_time, seed_all, Logger
 from MolEditFormer.models import CLIP
-from MolEditFormer.datasets import MolPair_DockingSmiles
+from MolEditFormer.datasets import MolPair_DockingSmiles_BindingAffinity, MolPair_DockingSmiles_pIC50
 
 
 class epoch_based_WarmupCosineLR(_LRScheduler):
@@ -104,7 +104,13 @@ def main(args):
     ).to(device)
     model.train()
 
-    train_set = MolPair_DockingSmiles(args.data_dir, args.template_path, mode=args.dataset_mode, target_name=args.target_name, version=args.version)
+    if args.target_name in ["COX2", "DRD2", "EGFR", "SARS_Cov_3C"]:
+        train_set = MolPair_DockingSmiles_BindingAffinity(args.data_dir, args.template_path, mode=args.dataset_mode, target_name=args.target_name, version=args.version)
+    elif args.target_name == "2QBR":
+        train_set = MolPair_DockingSmiles_pIC50(args.data_dir, args.template_path, mode=args.dataset_mode, target_name=args.target_name, max_num_pairs_per_task=args.max_num_pairs_per_task, version=args.version)
+    else:
+        raise ValueError("Invalid target name")
+
     train_loader = DataLoader(train_set, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
 
     model_param_group = [
@@ -186,7 +192,8 @@ if __name__ == "__main__":
     parser.add_argument("--template_path", type=str, default="template/template.txt")
     parser.add_argument("--version", type=str, default="v1", choices=["v1", "v2", "v3", "v4"])
     parser.add_argument("--dataset_mode", type=str, default="main", choices=["full", "main", "expand"])
-    parser.add_argument("--target_name", type=str, default="COX2", choices=["COX2", "DRD2", "EGFR", "SARS_Cov_3C"])
+    parser.add_argument("--max_num_pairs_per_task", type=int, default=500)
+    parser.add_argument("--target_name", type=str, default="COX2", choices=["COX2", "DRD2", "EGFR", "SARS_Cov_3C", "2QBR"])
     # dataloader config
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--num_workers", type=int, default=8)

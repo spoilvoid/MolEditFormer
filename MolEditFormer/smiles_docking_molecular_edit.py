@@ -6,6 +6,7 @@ import time
 import argparse
 import numpy as np
 import pandas as pd
+from collections import Counter
 import json
 from tqdm import tqdm
 from sklearn import preprocessing
@@ -27,9 +28,9 @@ from torch.utils.tensorboard import SummaryWriter
 from transformers import AutoModel, AutoTokenizer
 
 from MolEditFormer.utils.basic_utils import get_local_time, seed_all, Logger
-from MolEditFormer.utils.molecule_edit_utils import process_ligand_smiles, calculate_grid_box, autodock_vina_pipeline
+from MolEditFormer.utils.molecule_edit_utils import HARD_THRESHOLD_DICT, evaluate_molecular_edit_result, process_ligand_smiles, calculate_grid_box, autodock_vina_pipeline
 from MolEditFormer.models import CLIP
-from MolEditFormer.datasets import MolPair_DockingSmiles_Test
+from MolEditFormer.datasets import MolPair_DockingSmiles_BindingAffinity_Test, MolPair_DockingSmiles_pIC50_active2active_Test, MolPair_DockingSmiles_pIC50_other_Test
 
 
 TARGET2ID_DICT = {
@@ -107,7 +108,27 @@ def main(args):
     ).to(device)
     model.eval()
 
-    test_set = MolPair_DockingSmiles_Test(root=args.data_dir, template_path=args.template_path, target_name=args.target_name, mode=args.dataset_mode, version=args.version)
+    if args.target_name in ["COX2", "DRD2", "EGFR", "SARS_Cov_3C"]:
+        if args.dataset_mode == "random":
+            test_set = MolPair_DockingSmiles_BindingAffinity_Test(root=args.data_dir, template_path=args.template_path, target_name=args.target_name, mode=args.dataset_mode, version=args.version)
+        elif args.dataset_mode in ["iterative", "vote"]:
+            test_set = MolPair_DockingSmiles_BindingAffinity_Test(root=args.data_dir, template_path=args.template_path, target_name=args.target_name, mode="iterative", version=args.version)
+    elif args.target_name == "2QBR":
+        if args.test_type == "active2active":
+            if args.dataset_mode == "random":
+                test_set = MolPair_DockingSmiles_pIC50_active2active_Test(root=args.data_dir, template_path=args.template_path, task_id=args.task_id, target_name=args.target_name, mode=args.dataset_mode, version=args.version)
+            elif args.dataset_mode in ["iterative", "vote"]:
+                test_set = MolPair_DockingSmiles_pIC50_active2active_Test(root=args.data_dir, template_path=args.template_path, task_id=args.task_id, target_name=args.target_name, mode="iterative", version=args.version)
+        elif args.test_type == "other":
+            if args.dataset_mode == "random":
+                test_set = MolPair_DockingSmiles_pIC50_other_Test(root=args.data_dir, template_path=args.template_path, target_name=args.target_name, mode=args.dataset_mode, version=args.version)
+            elif args.dataset_mode in ["iterative", "vote"]:
+                test_set = MolPair_DockingSmiles_pIC50_other_Test(root=args.data_dir, template_path=args.template_path, target_name=args.target_name, mode="iterative", version=args.version)
+        else:
+            raise ValueError("Invalid test type")
+    else:
+        raise ValueError("Invalid target name")
+
     test_loader = DataLoader(test_set, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
 
     original_smiles_list, result_smiles_list = [], []
@@ -119,25 +140,116 @@ def main(args):
 
         original_smiles_list.extend(input_molecule_batched)
         result_smiles_list.extend(edited_molecule_batched)
-    
-    utils_dir = osp.join(args.data_dir, "evaluate_utils")
-    
-    input_prop_filepath = osp.join(utils_dir, f"{args.target_name}_input_prop.csv")
-    input_prop_df = pd.read_csv(input_prop_filepath)
-    input_smiles_list = input_prop_df["smiles"].tolist()
-    input_prop_list = input_prop_df["binding_affinity"].tolist()
 
-    original_prop_list = []
-    for original_smi in original_smiles_list:
-        index = input_smiles_list.index(original_smi)
-        original_prop_list.append(input_prop_list[index])
+    if args.target_name in ["COX2", "DRD2", "EGFR", "SARS_Cov_3C"]:
+        utils_dir = osp.join(args.data_dir, "evaluate_utils")
+        
+        input_prop_filepath = osp.join(utils_dir, f"{args.target_name}_input_prop.csv")
+        input_prop_df = pd.read_csv(input_prop_filepath)
+        input_smiles_list = input_prop_df["smiles"].tolist()
+        input_prop_list = input_prop_df["binding_affinity"].tolist()
 
-    result_df = pd.DataFrame({
-        "input_smiles": original_smiles_list,
-        "output_smiles": result_smiles_list,
-        "input_binding_affinity": original_prop_list,
-    })
-    result_df.to_csv(osp.join(result_save_dir, f"{args.target_name}_results.csv"), index=False)
+        original_prop_list = []
+        for original_smi in original_smiles_list:
+            index = input_smiles_list.index(original_smi)
+            original_prop_list.append(input_prop_list[index])
+
+        result_df = pd.DataFrame({
+            "input_smiles": original_smiles_list,
+            "output_smiles": result_smiles_list,
+            "input_binding_affinity": original_prop_list,
+        })
+        result_df.to_csv(osp.join(result_save_dir, f"{args.target_name}_results.csv"), index=False)
+    elif args.target_name == "2QBR":
+        # store original result for docking
+        result_df = pd.DataFrame({
+            "input_smiles": original_smiles_list,
+            "output_smiles": result_smiles_list,
+        })
+        if args.test_type == "other":
+            result_df.to_csv(osp.join(result_save_dir, f"{args.target_name}_other_results.csv"), index=False)
+        elif args.test_type == "active2active":
+            if args.hard_threshold:
+                result_df.to_csv(osp.join(result_save_dir, f"{args.target_name}_task_{args.task_id}_hard_threshold_results.csv"), index=False)
+            else:
+                result_df.to_csv(osp.join(result_save_dir, f"{args.target_name}_task_{args.task_id}_soft_threshold_results.csv"), index=False)
+        else:
+            raise ValueError("Invalid test type")
+
+        # process 101~108、201~206 tasks        
+        if args.hard_threshold:
+            threshold_list = HARD_THRESHOLD_DICT[args.task_id]
+            result_filepath = osp.join(result_save_dir, f"task_{args.task_id}_hard_threshold_results.json")
+        else:
+            threshold_list = [0 for _ in range(len(HARD_THRESHOLD_DICT[args.task_id]))]
+            result_filepath = osp.join(result_save_dir, f"task_{args.task_id}_soft_threshold_results.json")
+        if args.dataset_mode in ["random", "iterative"]:
+            distinct_input_smiles_list = list(set(original_smiles_list))
+            result_dict = {input_smi: {"invalid":[], "unsatisfied":[], "successful":[]} for input_smi in distinct_input_smiles_list}
+            for input_smi, output_smi in zip(original_smiles_list, result_smiles_list):
+                result, reason = evaluate_molecular_edit_result(input_smi, output_smi, task_id=args.task_id, threshold_list=threshold_list)
+                if result:
+                    result_dict[input_smi]["successful"].append(output_smi)
+                elif "invalid" in reason:
+                    result_dict[input_smi]["invalid"].append(output_smi)
+                else:
+                    result_dict[input_smi]["unsatisfied"].append(output_smi)
+
+            count = 0
+            for input_smi in result_dict.keys():
+                if len(result_dict[input_smi]["successful"]) > 0:
+                    count += 1
+            
+            success_rate = count / len(distinct_input_smiles_list)
+            result_dict["success_rate"] = success_rate
+            print(f"Success rate: {success_rate * 100:.2f}%")
+
+            with open(result_filepath, 'w') as json_file:
+                json.dump(result_dict, json_file, indent=4)
+
+        elif args.dataset_mode == "vote":
+            distinct_input_smiles_list = list(set(original_smiles_list))
+            vote_dict = {input_smi: [] for input_smi in distinct_input_smiles_list}
+            for input_smi, output_smi in zip(original_smiles_list, result_smiles_list):
+                vote_dict[input_smi].append(output_smi)
+            for input_smi in distinct_input_smiles_list:
+                counter = Counter(vote_dict[input_smi])
+                vote_dict[input_smi] = counter.most_common()
+
+            topk_list = ["top1", "top3", "top5", "top10"]
+            result_dict = {input_smi: {topk: [] for topk in topk_list} for input_smi in distinct_input_smiles_list}
+            for input_smi in distinct_input_smiles_list:
+                for k in range(1, 11):
+                    if len(vote_dict[input_smi]) >= k:
+                        output_smi = vote_dict[input_smi][k-1][0]
+                        _, reason = evaluate_molecular_edit_result(input_smi, output_smi, task_id=args.task_id, threshold_list=threshold_list)
+                    else:
+                        output_smi = ""
+                        reason = "not enough candidates"
+                    if k == 1:
+                        result_dict[input_smi]["top1"].append((output_smi, reason))
+                    if k <= 3:
+                        result_dict[input_smi]["top3"].append((output_smi, reason))
+                    if k <= 5:
+                        result_dict[input_smi]["top5"].append((output_smi, reason))
+                    if k <= 10:
+                        result_dict[input_smi]["top10"].append((output_smi, reason))
+
+            count_vector = [0 for _ in topk_list]
+            for idx, topk in enumerate(topk_list):
+                for input_smi in result_dict.keys():
+                    if any("success" in reason for _, reason in result_dict[input_smi][topk]):
+                        count_vector[idx] += 1
+            for idx, topk in enumerate(topk_list):
+                count = count_vector[idx]
+                success_rate = count / len(distinct_input_smiles_list)
+                result_dict[f"{topk}_success_rate"] = success_rate
+                print(f"{topk} success rate: {success_rate * 100:.2f}%")
+
+            with open(result_filepath, 'w') as json_file:
+                json.dump(result_dict, json_file, indent=4)
+    else:
+        raise ValueError("Invalid target name")
     # protein_filepath = osp.join(utils_dir, TARGET2ID_DICT[args.target_name])
     # center_x, center_y, center_z, size_x, size_y, size_z = calculate_grid_box(protein_filepath, buffer=args.buffer)
     # grid_box_config = {
@@ -197,10 +309,15 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     # dataset config
     parser.add_argument("--data_dir", type=str, default="data/EditBenchmark/target")
-    parser.add_argument("--dataset_mode", type=str, default="random", choices=["random", "iterative"])
+    parser.add_argument("--dataset_mode", type=str, default="random", choices=["random", "iterative", "vote"])
     parser.add_argument("--template_path", type=str, default="template/template.txt")
     parser.add_argument("--version", type=str, default="v1", choices=["v1", "v2", "v3", "v4"])
-    parser.add_argument("--target_name", type=str, default="COX2", choices=["COX2", "DRD2", "EGFR", "SARS_Cov_3C"])
+    parser.add_argument("--target_name", type=str, default="COX2", choices=["COX2", "DRD2", "EGFR", "SARS_Cov_3C", "2QBR"])
+    parser.add_argument("--test_type", type=str, default="active2active", choices=["active2active", "other"])
+    parser.add_argument("--task_id", type=int, default=101, choices=list(range(101, 109))+list(range(201, 207)))
+    parser.add_argument("--hard_threshold", dest='hard_threshold', action='store_true')
+    parser.add_argument('--soft_threshold', dest='hard_threshold', action='store_false')
+    parser.set_defaults(hard_threshold=False)
     # dataloader config
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--num_workers", type=int, default=8)
