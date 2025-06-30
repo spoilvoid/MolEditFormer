@@ -168,6 +168,7 @@ def main(args):
         })
         if args.test_type == "other":
             result_df.to_csv(osp.join(result_save_dir, f"{args.target_name}_other_results.csv"), index=False)
+            return
         elif args.test_type == "active2active":
             if args.hard_threshold:
                 result_df.to_csv(osp.join(result_save_dir, f"{args.target_name}_task_{args.task_id}_hard_threshold_results.csv"), index=False)

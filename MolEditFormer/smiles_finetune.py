@@ -200,15 +200,11 @@ def main(args):
         logger.log("{}th epoch mean loss:{}".format(epoch_id + 1, epoch_loss))
         writer.add_scalar("Train_Loss/epoch", epoch_loss, epoch_id + 1)
         model.save_model(model_save_dir, f"epoch{epoch_id}", save_config)
-        if epoch_loss < optimal_loss:
-            optimal_loss = epoch_loss
-            model.save_model(model_save_dir, "best", save_config)
         
         # validation step for 1 epoch
         if 0 < args.validation_ratio < 1:
             model.eval()
             val_loss = 0.0
-            task_id_list, input_smiles_list, edit_smiles_list = [], [], []
             for i_batch, sample_batched in tqdm(enumerate(val_loader), disable=False, total=len(val_loader)):
                 input_molecule_batched = sample_batched[0]
                 output_molecule_batched = sample_batched[1]
@@ -217,25 +213,19 @@ def main(args):
                 _, mask_loss = model(input_molecule_batched, description_batched, batch_output_molecule=output_molecule_batched)
                 all_loss = mask_loss
 
-                task_id_list.extend([get_task_id_from_description(description, args.version) for description in description_batched])
-                input_smiles_list.extend(input_molecule_batched)
-                edit_smiles_list.extend(model.edit_molecules(batch_input_molecule=input_molecule_batched, batch_input_text=description_batched))
-
                 loss = round((all_loss.detach().clone()).cpu().item(), 4)
                 val_loss += loss / len(val_loader)
 
             logger.log("{}th epoch validation loss:{}".format(epoch_id + 1, val_loss))
             writer.add_scalar("Validation_Loss/epoch", val_loss, epoch_id + 1)
 
-            hit_count = 0
-            for task_id, input_smiles, edit_smiles in zip(task_id_list, input_smiles_list, edit_smiles_list):
-                is_success, reason = evaluate_molecular_edit_result(input_smi=input_smiles, edit_smiles=edit_smiles, task_id=task_id)
-                if is_success:
-                    hit_count += 1
-            hit_rate = hit_count / len(task_id_list)
-            logger.log("{}th epoch validation random hit rate:{}".format(epoch_id + 1, hit_rate))
-            writer.add_scalar("Validation_Random_HitRate/epoch", hit_rate, epoch_id + 1)
-
+            if val_loss < optimal_loss:
+                optimal_loss = val_loss
+                model.save_model(model_save_dir, "best", save_config)
+        else:
+            if epoch_loss < optimal_loss:
+                optimal_loss = epoch_loss
+                model.save_model(model_save_dir, "best", save_config)
 
 
 if __name__ == "__main__":
@@ -249,7 +239,7 @@ if __name__ == "__main__":
     parser.add_argument("--version", type=str, default="v1", choices=["v1", "v2", "v3", "v4"])
     parser.add_argument("--dataset_mode", type=str, default="main", choices=["full", "main", "expand"])
     parser.add_argument("--max_num_pairs_per_task", type=int, default=25000)
-    parser.add_argument("--validation_ratio", type=float, default=0.0)
+    parser.add_argument("--validation_ratio", type=float, default=0.05)
     # dataloader config
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--num_workers", type=int, default=8)

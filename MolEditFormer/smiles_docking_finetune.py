@@ -13,14 +13,14 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.optim.lr_scheduler import _LRScheduler
-from torch.utils.data import DataLoader
+from torch.utils.data import random_split, DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
 from transformers import AutoModel, AutoTokenizer
 
 from MolEditFormer.utils.basic_utils import get_local_time, seed_all, Logger
 from MolEditFormer.models import CLIP
-from MolEditFormer.datasets import MolPair_DockingSmiles_BindingAffinity, MolPair_DockingSmiles_pIC50
+from MolEditFormer.datasets import MolPair_PairSmiles, MolPair_DockingSmiles_BindingAffinity, MolPair_DockingSmiles_pIC50
 
 
 class epoch_based_WarmupCosineLR(_LRScheduler):
@@ -104,14 +104,39 @@ def main(args):
     ).to(device)
     model.train()
 
+    # 3rd step dataset for docking
     if args.target_name in ["COX2", "DRD2", "EGFR", "SARS_Cov_3C"]:
-        train_set = MolPair_DockingSmiles_BindingAffinity(args.data_dir, args.template_path, mode=args.dataset_mode, target_name=args.target_name, version=args.version)
+        docking_train_set = MolPair_DockingSmiles_BindingAffinity(args.data_dir, args.template_path, mode=args.dataset_mode, target_name=args.target_name, version=args.version)
     elif args.target_name == "2QBR":
-        train_set = MolPair_DockingSmiles_pIC50(args.data_dir, args.template_path, mode=args.dataset_mode, target_name=args.target_name, max_num_pairs_per_task=args.max_num_pairs_per_task, version=args.version)
+        docking_train_set = MolPair_DockingSmiles_pIC50(args.data_dir, args.template_path, mode=args.dataset_mode, target_name=args.target_name, max_num_pairs_per_task=args.max_num_pairs_per_task, version=args.version)
     else:
         raise ValueError("Invalid target name")
 
-    train_loader = DataLoader(train_set, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
+    # 2nd step dataset for mixture learning
+    if 0 < args.ratio_2nd < 1:
+        extra_data_num = int(len(docking_train_set) * args.ratio_2nd / (1 - args.ratio_2nd))
+        extra_set = MolPair_PairSmiles(args.data_dir_2nd, args.template_path, mode=args.dataset_mode, max_num_pairs_per_task=args.max_num_pairs_per_task_2nd, version=args.version)
+        if extra_data_num > len(extra_set):
+            logger.log("2nd step dataset is not enough, use all data")
+            extra_data_num = len(extra_set)
+    elif args.ratio_2nd >= 1:
+        raise ValueError("Invalid ratio_2nd, should be in [0, 1)")
+    
+    # validation set split
+    if 0 < args.validation_ratio < 1:
+        docking_dataset_size = len(docking_train_set)
+        docking_val_size = int(docking_dataset_size * args.validation_ratio)
+        docking_train_size = docking_dataset_size - docking_val_size
+        docking_train_set, docking_val_set = random_split(docking_train_set, [docking_train_size, docking_val_size])
+
+        extra_val_size = int(extra_data_num * args.validation_ratio)
+        extra_train_size = extra_data_num - extra_val_size
+        extra_set, extra_val_set = random_split(extra_set, [len(extra_set) - extra_val_size, extra_val_size])
+
+        val_set = torch.utils.data.ConcatDataset([docking_val_set, extra_val_set])
+        val_loader = DataLoader(val_set, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
+    elif args.validation_ratio >= 1:
+        raise ValueError("Invalid validation_ratio, should be in [0, 1)")
 
     model_param_group = [
         {"params": model.text_model.parameters(), "lr": args.text_lr},
@@ -135,6 +160,16 @@ def main(args):
     nan_flag = False
     optimal_loss = args.loss_threshold
     for epoch_id in range(args.start_epoch, args.epoch_num):
+        # gen aggregated dataset & dataloader for every epoch
+        if 0 < args.ratio_2nd < 1:
+            extra_train_set, _ = random_split(extra_set, [extra_train_size, len(extra_set) - extra_train_size])
+            train_set = torch.utils.data.ConcatDataset([docking_train_set, extra_train_set])
+        elif args.ratio_2nd == 0:
+            train_set = docking_train_set
+        else:
+            raise ValueError("Invalid ratio_2nd, should be in [0, 1)")
+        train_loader = DataLoader(train_set, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
+
         epoch_loss = 0.0
         for i_batch, sample_batched in tqdm(enumerate(train_loader), disable=False, total=len(train_loader)):
             input_molecule_batched = sample_batched[0]
@@ -177,9 +212,32 @@ def main(args):
         logger.log("{}th epoch mean loss:{}".format(epoch_id + 1, epoch_loss))
         writer.add_scalar("Train_Loss/epoch", epoch_loss, epoch_id + 1)
         model.save_model(model_save_dir, f"epoch{epoch_id}", save_config)
-        if epoch_loss < optimal_loss:
-            optimal_loss = epoch_loss
-            model.save_model(model_save_dir, "best", save_config)
+
+        # validation step for 1 epoch
+        if 0 < args.validation_ratio < 1:
+            model.eval()
+            val_loss = 0.0
+            for i_batch, sample_batched in tqdm(enumerate(val_loader), disable=False, total=len(val_loader)):
+                input_molecule_batched = sample_batched[0]
+                output_molecule_batched = sample_batched[1]
+                description_batched = sample_batched[2]
+                
+                _, mask_loss = model(input_molecule_batched, description_batched, batch_output_molecule=output_molecule_batched)
+                all_loss = mask_loss
+
+                loss = round((all_loss.detach().clone()).cpu().item(), 4)
+                val_loss += loss / len(val_loader)
+
+            logger.log("{}th epoch validation loss:{}".format(epoch_id + 1, val_loss))
+            writer.add_scalar("Validation_Loss/epoch", val_loss, epoch_id + 1)
+
+            if val_loss < optimal_loss:
+                optimal_loss = val_loss
+                model.save_model(model_save_dir, "best", save_config)
+        else:
+            if epoch_loss < optimal_loss:
+                optimal_loss = epoch_loss
+                model.save_model(model_save_dir, "best", save_config)
 
 
 if __name__ == "__main__":
@@ -192,8 +250,13 @@ if __name__ == "__main__":
     parser.add_argument("--template_path", type=str, default="template/template.txt")
     parser.add_argument("--version", type=str, default="v1", choices=["v1", "v2", "v3", "v4"])
     parser.add_argument("--dataset_mode", type=str, default="main", choices=["full", "main", "expand"])
-    parser.add_argument("--max_num_pairs_per_task", type=int, default=500)
     parser.add_argument("--target_name", type=str, default="COX2", choices=["COX2", "DRD2", "EGFR", "SARS_Cov_3C", "2QBR"])
+    parser.add_argument("--max_num_pairs_per_task", type=int, default=500)
+    parser.add_argument("--validation_ratio", type=float, default=0.05)
+    # 2nd step dataset for mixture learning config
+    parser.add_argument("--data_dir_2nd", type=str, default="data/MolPair/mol_pair")
+    parser.add_argument("--max_num_pairs_per_task_2nd", type=int, default=25000)
+    parser.add_argument("--ratio_2nd", type=float, default=0.2)
     # dataloader config
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--num_workers", type=int, default=8)

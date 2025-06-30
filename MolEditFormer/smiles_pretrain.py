@@ -193,9 +193,6 @@ def main(args):
         logger.log("{}th epoch mean loss:{}".format(epoch_id + 1, epoch_loss))
         writer.add_scalar("Train_Loss/epoch", epoch_loss, epoch_id + 1)
         model.save_model(model_save_dir, f"epoch{epoch_id}", save_config)
-        if epoch_loss < optimal_loss:
-            optimal_loss = epoch_loss
-            model.save_model(model_save_dir, "best", save_config)
         
         # validation step for 1 epoch
         if 0 < args.validation_ratio < 1:
@@ -229,6 +226,14 @@ def main(args):
             logger.log("{}th epoch validation reconstruct ratio:{}".format(epoch_id + 1, hit_ratio))
             writer.add_scalar("Validation_Reconstruct_Ratio/epoch", hit_ratio, epoch_id + 1)
 
+            if val_loss < optimal_loss:
+                optimal_loss = val_loss
+                model.save_model(model_save_dir, "best", save_config)
+        else:
+            if epoch_loss < optimal_loss:
+                optimal_loss = epoch_loss
+                model.save_model(model_save_dir, "best", save_config)
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -243,7 +248,7 @@ if __name__ == "__main__":
     parser.add_argument("--can2can_ratio", type=float, default=1.0)
     parser.add_argument("--non2can_ratio", type=float, default=0.0)
     parser.add_argument("--non2non_ratio", type=float, default=0.0)
-    parser.add_argument("--validation_ratio", type=float, default=0.0)
+    parser.add_argument("--validation_ratio", type=float, default=0.05)
     # dataloader config
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--num_workers", type=int, default=8)

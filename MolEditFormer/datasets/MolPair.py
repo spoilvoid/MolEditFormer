@@ -702,7 +702,7 @@ class MolPair_DockingSmiles_pIC50_active2active_Test(Dataset):
             self.root = osp.join(root, "tagged_"+version)
         self.version = version
         self.target_name = target_name
-        self.task_id = task_id
+        self.task_id = str(task_id)
 
         self.raw_filepath = osp.join(self.root, "raw", f"{target_name}_task_{task_id}_active2active.csv")
 
