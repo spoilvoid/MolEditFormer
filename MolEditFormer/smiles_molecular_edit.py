@@ -102,6 +102,10 @@ def main(args):
             else:
                 result_dict[input_smi]["unsatisfied"].append(output_smi)
 
+        for input_smi in result_dict.keys():
+            for reason in ["invalid", "unsatisfied", "successful"]:
+                result_dict[input_smi][reason] = list(set(result_dict[input_smi][reason]))
+                
         count = 0
         for input_smi in result_dict.keys():
             if len(result_dict[input_smi]["successful"]) > 0:

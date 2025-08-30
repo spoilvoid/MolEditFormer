@@ -36,7 +36,7 @@ TEXT_REQUIREMENTS_V1 = {
     "EGFR": "increase the binding affinity for the target",
     "SARS_Cov_3C": "increase the binding affinity for the target",
     "2QBR_active2active": "maintain pIC50 for the target at least 6.5 with certain activity while ${task_requirement}",
-    "2QBR_other": "increase pIC50 for the target to at least 6.5",
+    "2QBR_other": "increase pIC50 for the target ${task_requirement}",
 }
 TEXT_REQUIREMENTS_V2 = {
     "101": "more soluble in water",
@@ -81,7 +81,7 @@ TEXT_REQUIREMENTS_V3 = {
     "DRD2": "increase the binding affinity for the target from ${input_level1} to ${output_level1}",
     "EGFR": "increase the binding affinity for the target from ${input_level1} to ${output_level1}",
     "SARS_Cov_3C": "increase the binding affinity for the target from ${input_level1} to ${output_level1}",
-    "2QBR_active2active": "maintain pIC50 for the target at least ${output_level1} with certain activity while ${task_requirement}",
+    "2QBR_active2active": "maintain pIC50 for the target at least slightly high pIC50 with certain activity while ${task_requirement}",
     "2QBR_other": "increase pIC50 for the target from ${input_level1} to ${output_level1}",
 }
 TEXT_REQUIREMENTS_V4 = {

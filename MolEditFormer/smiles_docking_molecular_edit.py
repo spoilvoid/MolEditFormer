@@ -167,7 +167,47 @@ def main(args):
             "output_smiles": result_smiles_list,
         })
         if args.test_type == "other":
-            result_df.to_csv(osp.join(result_save_dir, f"{args.target_name}_other_results.csv"), index=False)
+            result_filepath = osp.join(result_save_dir, f"{args.target_name}_other_results.json")
+            if args.dataset_mode in ["random", "iterative"]:
+                distinct_input_smiles_list = list(set(original_smiles_list))
+                result_dict = {input_smi: [] for input_smi in distinct_input_smiles_list}
+                for input_smi, output_smi in zip(original_smiles_list, result_smiles_list):
+                    result_dict[input_smi].append(output_smi)
+                for input_smi in distinct_input_smiles_list:
+                    result_dict[input_smi] = list(set(result_dict[input_smi]))
+
+                with open(result_filepath, 'w') as json_file:
+                    json.dump(result_dict, json_file, indent=4)
+
+            elif args.dataset_mode == "vote":
+                distinct_input_smiles_list = list(set(original_smiles_list))
+                vote_dict = {input_smi: [] for input_smi in distinct_input_smiles_list}
+                for input_smi, output_smi in zip(original_smiles_list, result_smiles_list):
+                    vote_dict[input_smi].append(output_smi)
+                for input_smi in distinct_input_smiles_list:
+                    counter = Counter(vote_dict[input_smi])
+                    vote_dict[input_smi] = counter.most_common()
+
+                topk_list = ["top1", "top3", "top5", "top10"]
+                result_dict = {input_smi: {topk: [] for topk in topk_list} for input_smi in distinct_input_smiles_list}
+                for input_smi in distinct_input_smiles_list:
+                    for k in range(1, 11):
+                        if len(vote_dict[input_smi]) >= k:
+                            output_smi = vote_dict[input_smi][k-1][0]
+                        else:
+                            output_smi = ""
+                        if k == 1:
+                            result_dict[input_smi]["top1"].append((output_smi))
+                        if k <= 3:
+                            result_dict[input_smi]["top3"].append((output_smi))
+                        if k <= 5:
+                            result_dict[input_smi]["top5"].append((output_smi))
+                        if k <= 10:
+                            result_dict[input_smi]["top10"].append((output_smi))
+
+                with open(result_filepath, 'w') as json_file:
+                    json.dump(result_dict, json_file, indent=4)
+
             return
         elif args.test_type == "active2active":
             if args.hard_threshold:
@@ -195,6 +235,10 @@ def main(args):
                     result_dict[input_smi]["invalid"].append(output_smi)
                 else:
                     result_dict[input_smi]["unsatisfied"].append(output_smi)
+            
+            for input_smi in result_dict.keys():
+                for reason in ["invalid", "unsatisfied", "successful"]:
+                    result_dict[input_smi][reason] = list(set(result_dict[input_smi][reason]))
 
             count = 0
             for input_smi in result_dict.keys():

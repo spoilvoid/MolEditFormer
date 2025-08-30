@@ -222,8 +222,8 @@ class MolPair_PairSmiles(Dataset):
                 task_description = re.sub(r'\${input}', 'the above molecule', template)
                 if self.version == "v1":
                     task_description = re.sub(r'\${requirement}', TEXT_REQUIREMENTS_V1[task_id], task_description)
-                elif self.version == "v2":
-                    task_description = re.sub(r'\${requirement}', TEXT_REQUIREMENTS_V2[task_id], task_description)
+                # elif self.version == "v2":
+                #     task_description = re.sub(r'\${requirement}', TEXT_REQUIREMENTS_V2[task_id], task_description)
                 elif self.version == "v3":
                     task_description = re.sub(r'\${requirement}', TEXT_REQUIREMENTS_V3[task_id], task_description)
                     for key, value in row.items():
@@ -301,8 +301,8 @@ class MolPair_PairSmiles_Test(Dataset):
                 task_description = re.sub(r'\${input}', 'the above molecule', template)
                 if self.version == "v1":
                     task_description = re.sub(r'\${requirement}', TEXT_REQUIREMENTS_V1[self.task_id], task_description)
-                elif self.version == "v2":
-                    task_description = re.sub(r'\${requirement}', TEXT_REQUIREMENTS_V2[self.task_id], task_description)
+                # elif self.version == "v2":
+                #     task_description = re.sub(r'\${requirement}', TEXT_REQUIREMENTS_V2[self.task_id], task_description)
                 elif self.version == "v3":
                     task_description = re.sub(r'\${requirement}', TEXT_REQUIREMENTS_V3[self.task_id], task_description)
                     task_description = re.sub(r'\${output_level(\d+)}', "another level", task_description)
@@ -318,8 +318,8 @@ class MolPair_PairSmiles_Test(Dataset):
                     task_description = re.sub(r'\${input}', 'the above molecule', template)
                     if self.version == "v1":
                         task_description = re.sub(r'\${requirement}', TEXT_REQUIREMENTS_V1[self.task_id], task_description)
-                    elif self.version == "v2":
-                        task_description = re.sub(r'\${requirement}', TEXT_REQUIREMENTS_V2[self.task_id], task_description)
+                    # elif self.version == "v2":
+                    #     task_description = re.sub(r'\${requirement}', TEXT_REQUIREMENTS_V2[self.task_id], task_description)
                     elif self.version == "v3":
                         task_description = re.sub(r'\${requirement}', TEXT_REQUIREMENTS_V3[self.task_id], task_description)
                         task_description = re.sub(r'\${output_level(\d+)}', "another level", task_description)
@@ -417,8 +417,8 @@ class MolPair_DockingSmiles_BindingAffinity(Dataset):
             task_description = re.sub(r'\${input}', 'the above molecule', template)
             if self.version == "v1":
                 task_description = re.sub(r'\${requirement}', TEXT_REQUIREMENTS_V1[self.target_name], task_description)
-            elif self.version == "v2":
-                task_description = re.sub(r'\${requirement}', TEXT_REQUIREMENTS_V2[self.target_name], task_description)
+            # elif self.version == "v2":
+            #     task_description = re.sub(r'\${requirement}', TEXT_REQUIREMENTS_V2[self.target_name], task_description)
             elif self.version == "v3":
                 task_description = re.sub(r'\${requirement}', TEXT_REQUIREMENTS_V3[self.target_name], task_description)
                 for key, value in row.items():
@@ -497,8 +497,8 @@ class MolPair_DockingSmiles_BindingAffinity_Test(Dataset):
                 task_description = re.sub(r'\${input}', 'the above molecule', template)
                 if self.version == "v1":
                     task_description = re.sub(r'\${requirement}', TEXT_REQUIREMENTS_V1[self.target_name], task_description)
-                elif self.version == "v2":
-                    task_description = re.sub(r'\${requirement}', TEXT_REQUIREMENTS_V2[self.target_name], task_description)
+                # elif self.version == "v2":
+                #     task_description = re.sub(r'\${requirement}', TEXT_REQUIREMENTS_V2[self.target_name], task_description)
                 elif self.version == "v3":
                     task_description = re.sub(r'\${requirement}', TEXT_REQUIREMENTS_V3[self.target_name], task_description)
                     task_description = re.sub(r'\${output_level(\d+)}', "another level", task_description)
@@ -513,8 +513,8 @@ class MolPair_DockingSmiles_BindingAffinity_Test(Dataset):
                     task_description = re.sub(r'\${input}', 'the above molecule', template)
                     if self.version == "v1":
                         task_description = re.sub(r'\${requirement}', TEXT_REQUIREMENTS_V1[self.target_name], task_description)
-                    elif self.version == "v2":
-                        task_description = re.sub(r'\${requirement}', TEXT_REQUIREMENTS_V2[self.target_name], task_description)
+                    # elif self.version == "v2":
+                    #     task_description = re.sub(r'\${requirement}', TEXT_REQUIREMENTS_V2[self.target_name], task_description)
                     elif self.version == "v3":
                         task_description = re.sub(r'\${requirement}', TEXT_REQUIREMENTS_V3[self.target_name], task_description)
                         task_description = re.sub(r'\${output_level(\d+)}', "another level", task_description)
@@ -627,9 +627,9 @@ class MolPair_DockingSmiles_pIC50(Dataset):
                 if self.version == "v1":
                     task_description = re.sub(r'\${requirement}', TEXT_REQUIREMENTS_V1[f"{self.target_name}_active2active"], task_description)
                     task_description = re.sub(r'\${task_requirement}', TEXT_REQUIREMENTS_V1[task_id], task_description)
-                elif self.version == "v2":
-                    task_description = re.sub(r'\${requirement}', TEXT_REQUIREMENTS_V2[f"{self.target_name}_active2active"], task_description)
-                    task_description = re.sub(r'\${task_requirement}', TEXT_REQUIREMENTS_V2[task_id], task_description)
+                # elif self.version == "v2":
+                #     task_description = re.sub(r'\${requirement}', TEXT_REQUIREMENTS_V2[f"{self.target_name}_active2active"], task_description)
+                #     task_description = re.sub(r'\${task_requirement}', TEXT_REQUIREMENTS_V2[task_id], task_description)
                 elif self.version == "v3":
                     task_description = re.sub(r'\${requirement}', TEXT_REQUIREMENTS_V3[f"{self.target_name}_active2active"], task_description)
                     task_description = re.sub(r'\${task_requirement}', TEXT_REQUIREMENTS_V3[task_id], task_description)
@@ -654,10 +654,16 @@ class MolPair_DockingSmiles_pIC50(Dataset):
             task_description = re.sub(r'\${input}', 'the above molecule', template)
             if self.version == "v1":
                 task_description = re.sub(r'\${requirement}', TEXT_REQUIREMENTS_V1[f"{self.target_name}_other"], task_description)
-            elif self.version == "v2":
-                task_description = re.sub(r'\${requirement}', TEXT_REQUIREMENTS_V2[f"{self.target_name}_other"], task_description)
+                if row["task"] == "active":
+                    task_description = re.sub(r'\${task_requirement}', "to at least 6.5", task_description)
+                elif row["task"] == "increase":
+                    task_description = re.sub(r'\${task_requirement}', "by at least 1", task_description)
+                    # task_description = re.sub(r'\${task_requirement}', "to at least 5.5", task_description)
+            # elif self.version == "v2":
+            #     task_description = re.sub(r'\${requirement}', TEXT_REQUIREMENTS_V2[f"{self.target_name}_other"], task_description)
             elif self.version == "v3":
                 task_description = re.sub(r'\${requirement}', TEXT_REQUIREMENTS_V3[f"{self.target_name}_other"], task_description)
+                    # task_description = re.sub(r'\${task_requirement}', "to at least 5.5", task_description)
                 for key, value in row.items():
                     match = re.search(r'smiles1_level(\d+)', key)
                     if match:
@@ -666,7 +672,11 @@ class MolPair_DockingSmiles_pIC50(Dataset):
                     match = re.search(r'smiles2_level(\d+)', key)
                     if match:
                         input_prop_num = match.group(1)
-                        task_description = re.sub(r'\${output_level'+input_prop_num+'}', "at least slightly high pIC50 with certain activity", task_description)
+                        if row["task"] == "active":
+                            task_description = re.sub(r'\${output_level'+input_prop_num+'}', "at least slightly high pIC50 with certain activity", task_description)
+                        elif row["task"] == "increase":
+                            task_description = re.sub(r'\${output_level'+input_prop_num+'}', "another level", task_description)
+                            # task_description = re.sub(r'\${output_level'+input_prop_num+'}', "at least moderate pIC50 with activity uncertain but leaning toward inactive", task_description)
 
             self.description_list.append(normal_description_dict[row["smiles1"]] + " " + docking_description_dict[row["smiles1"]] + " " + task_description)
             self.input_smiles_list.append(row["smiles1"])
@@ -735,11 +745,12 @@ class MolPair_DockingSmiles_pIC50_active2active_Test(Dataset):
                 task_description = re.sub(r'\${input}', 'the above molecule', template)
                 if self.version == "v1":
                     task_description = re.sub(r'\${requirement}', TEXT_REQUIREMENTS_V1[f"{self.target_name}_active2active"], task_description)
-                    task_description = re.sub(r'\${requirement}', TEXT_REQUIREMENTS_V1[f"{self.target_name}_active2active"], task_description)
-                elif self.version == "v2":
-                    task_description = re.sub(r'\${requirement}', TEXT_REQUIREMENTS_V2[f"{self.target_name}_active2active"], task_description)
+                    task_description = re.sub(r'\${task_requirement}', TEXT_REQUIREMENTS_V1[self.task_id], task_description)
+                # elif self.version == "v2":
+                #     task_description = re.sub(r'\${requirement}', TEXT_REQUIREMENTS_V2[f"{self.target_name}_active2active"], task_description)
                 elif self.version == "v3":
                     task_description = re.sub(r'\${requirement}', TEXT_REQUIREMENTS_V3[f"{self.target_name}_active2active"], task_description)
+                    task_description = re.sub(r'\${task_requirement}', TEXT_REQUIREMENTS_V3[self.task_id], task_description)
                     task_description = re.sub(r'\${output_level(\d+)}', "another level", task_description)
                     for name_key, ref_prop in TASK_REFERENCE[self.target_name].items():
                         prop_level = row[ref_prop+"_level"]
@@ -753,9 +764,9 @@ class MolPair_DockingSmiles_pIC50_active2active_Test(Dataset):
                     if self.version == "v1":
                         task_description = re.sub(r'\${requirement}', TEXT_REQUIREMENTS_V1[f"{self.target_name}_other"], task_description)
                         task_description = re.sub(r'\${task_requirement}', TEXT_REQUIREMENTS_V1[self.task_id], task_description)
-                    elif self.version == "v2":
-                        task_description = re.sub(r'\${requirement}', TEXT_REQUIREMENTS_V2[f"{self.target_name}_other"], task_description)
-                        task_description = re.sub(r'\${task_requirement}', TEXT_REQUIREMENTS_V2[self.task_id], task_description)
+                    # elif self.version == "v2":
+                    #     task_description = re.sub(r'\${requirement}', TEXT_REQUIREMENTS_V2[f"{self.target_name}_other"], task_description)
+                    #     task_description = re.sub(r'\${task_requirement}', TEXT_REQUIREMENTS_V2[self.task_id], task_description)
                     elif self.version == "v3":
                         task_description = re.sub(r'\${requirement}', TEXT_REQUIREMENTS_V3[f"{self.target_name}_other"], task_description)
                         task_description = re.sub(r'\${task_requirement}', TEXT_REQUIREMENTS_V3[self.task_id], task_description)
@@ -826,11 +837,12 @@ class MolPair_DockingSmiles_pIC50_other_Test(Dataset):
                 task_description = re.sub(r'\${input}', 'the above molecule', template)
                 if self.version == "v1":
                     task_description = re.sub(r'\${requirement}', TEXT_REQUIREMENTS_V1[f"{self.target_name}_other"], task_description)
-                elif self.version == "v2":
-                    task_description = re.sub(r'\${requirement}', TEXT_REQUIREMENTS_V2[f"{self.target_name}_other"], task_description)
+                    task_description = re.sub(r'\${task_requirement}', "to at least 6.5", task_description)
+                # elif self.version == "v2":
+                #     task_description = re.sub(r'\${requirement}', TEXT_REQUIREMENTS_V2[f"{self.target_name}_other"], task_description)
                 elif self.version == "v3":
                     task_description = re.sub(r'\${requirement}', TEXT_REQUIREMENTS_V3[f"{self.target_name}_other"], task_description)
-                    task_description = re.sub(r'\${output_level(\d+)}', "another level", task_description)
+                    task_description = re.sub(r'\${output_level(\d+)}', "at least slightly high pIC50 with certain activity", task_description)
                     for name_key, ref_prop in TASK_REFERENCE[self.target_name].items():
                         prop_level = row[ref_prop+"_level"]
                         task_description = re.sub(r'\${'+name_key+'}', prop_level, task_description)
@@ -842,8 +854,9 @@ class MolPair_DockingSmiles_pIC50_other_Test(Dataset):
                     task_description = re.sub(r'\${input}', 'the above molecule', template)
                     if self.version == "v1":
                         task_description = re.sub(r'\${requirement}', TEXT_REQUIREMENTS_V1[f"{self.target_name}_other"], task_description)
-                    elif self.version == "v2":
-                        task_description = re.sub(r'\${requirement}', TEXT_REQUIREMENTS_V2[f"{self.target_name}_other"], task_description)
+                        task_description = re.sub(r'\${task_requirement}', "to at least 6.5", task_description)
+                    # elif self.version == "v2":
+                    #     task_description = re.sub(r'\${requirement}', TEXT_REQUIREMENTS_V2[f"{self.target_name}_other"], task_description)
                     elif self.version == "v3":
                         task_description = re.sub(r'\${requirement}', TEXT_REQUIREMENTS_V3[f"{self.target_name}_other"], task_description)
                         task_description = re.sub(r'\${output_level(\d+)}', "at least slightly high pIC50 with certain activity", task_description)
