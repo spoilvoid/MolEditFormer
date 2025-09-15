@@ -7,8 +7,16 @@ import torch
 from torch_geometric.data import Data
 from ogb.utils.features import atom_to_feature_vector, bond_to_feature_vector, allowable_features
 
+import rdkit
 from rdkit import Chem
+from rdkit.Chem import AllChem, DataStructs
+from rdkit.Chem import Descriptors
+from rdkit.Chem.Scaffolds import MurckoScaffold
+from rdkit.Chem import BRICS
+from rdkit import RDLogger
 
+lg = RDLogger.logger()
+lg.setLevel(RDLogger.CRITICAL)
 
 DESCRIPTION_MODE = ["full", "main", "expand"]
 RETRIEVAL_MODE = ["random", "iterative"]
@@ -444,3 +452,118 @@ def nx_to_graph_data_obj_simple(G):
     data = Data(x=x, edge_index=edge_index, edge_attr=edge_attr)
 
     return data
+
+
+def murcko_scaffold_with_attachments(smiles: str, generic: bool=False, isomeric: bool=True):
+    """
+    Input:
+        smiles: input molecule SMILES
+        generic: whether to use MakeScaffoldGeneric to generalize scaffold atoms/bonds
+        isomeric: whether to keep stereochemistry information in output SMILES
+    Output:
+        scaffold_smi_with_star: Murcko scaffold SMILES with attachment points [*]
+    """
+    try:
+        mol = Chem.MolFromSmiles(smiles)
+        if not mol:
+            raise ValueError("Invalid SMILES")
+
+        # 1) Generate the Murcko scaffold (framework of rings and linkers)
+        core = MurckoScaffold.GetScaffoldForMol(mol)
+        if core is None or core.GetNumAtoms() == 0:
+            # If no scaffold is found, return ""
+            return ""
+
+        if generic:
+            # Convert scaffold into a generic form (all atoms → C, all bonds → single)
+            core = MurckoScaffold.MakeScaffoldGeneric(core)
+
+        # 2) Map the scaffold back onto the original molecule
+        #    substructure match gives mapping: core atom index → original mol atom index
+        matches = mol.GetSubstructMatches(core, useChirality=isomeric)
+        if not matches:
+            # If mapping fails, just return the scaffold itself
+            return Chem.MolToSmiles(core, isomericSmiles=isomeric)
+        match = matches[0]
+        coreAtomInMol = set(match)  # set of atom indices in the original mol that belong to scaffold
+
+        # Build mapping: original mol atom index → core atom index
+        molIdx_to_coreIdx = {mol_idx: core_idx for core_idx, mol_idx in enumerate(match)}
+
+        # 3) Identify bonds between scaffold atoms and non-scaffold atoms in the original molecule
+        attach_counts = {}  # record how many attachment points each core atom should have
+        for bond in mol.GetBonds():
+            a = bond.GetBeginAtomIdx()
+            b = bond.GetEndAtomIdx()
+            a_in = a in coreAtomInMol
+            b_in = b in coreAtomInMol
+            if a_in ^ b_in:  # XOR: one atom is in scaffold, the other is not
+                core_mol_idx = a if a_in else b
+                core_atom_idx = molIdx_to_coreIdx.get(core_mol_idx, None)
+                if core_atom_idx is not None:
+                    attach_counts[core_atom_idx] = attach_counts.get(core_atom_idx, 0) + 1
+
+        # 4) For each connection, add a dummy atom [*] onto the scaffold atom
+        rw = Chem.RWMol(core)
+        for core_atom_idx, nstar in attach_counts.items():
+            for _ in range(nstar):
+                star = Chem.Atom(0)  # atomic number 0 = dummy atom [*]
+                star_idx = rw.AddAtom(star)
+                rw.AddBond(core_atom_idx, star_idx, order=Chem.BondType.SINGLE)
+
+        # 5) Convert back to SMILES
+        mol_with_star = rw.GetMol()
+        Chem.SanitizeMol(mol_with_star, catchErrors=True)  # clean up valence/aromaticity issues
+        scaffold_smi_with_star = Chem.MolToSmiles(mol_with_star, isomericSmiles=isomeric)
+    except Exception as e:
+        print(f"Error processing SMILES {smiles}: {e}")
+        scaffold_smi_with_star = ""
+
+    return scaffold_smi_with_star
+
+
+def brics_scaffold_with_attachments(smiles: str, isomeric: bool=True):
+    """
+    Input: 
+        - smiles: SMILES string
+        - isomeric: Whether to consider stereochemistry in the output SMILES
+    Output:
+        - scaffold_smi: BRICS scaffold SMILES with dummy atoms [*] at cleavage points
+    """
+    try:
+        mol = Chem.MolFromSmiles(smiles)
+        if mol is None:
+            raise ValueError("Invalid SMILES")
+
+        # 1) Identify BRICS bonds to be cleaved
+        brics_bonds = BRICS.FindBRICSBonds(mol)
+        bond_indices = []
+        dummy_labels = []
+
+        for (a_idx, b_idx), (a_lab, b_lab) in brics_bonds:
+            bond = mol.GetBondBetweenAtoms(a_idx, b_idx)
+            bond_indices.append(bond.GetIdx())
+            # For each cleaved bond, add a pair of dummy atoms with BRICS labels
+            dummy_labels.append((int(a_lab), int(b_lab)))
+
+        # 2) If no BRICS bonds are found, return ""
+        if not bond_indices:
+            scaffold_smi = Chem.MolToSmiles(mol, isomericSmiles=isomeric)
+            brics_frags = sorted(BRICS.BRICSDecompose(mol))
+            return ""
+
+        # 3) Cleave the bonds and insert dummy atoms [*] with BRICS labels
+        broken = Chem.FragmentOnBonds(
+            mol,
+            bondIndices=bond_indices,
+            addDummies=True,
+            dummyLabels=dummy_labels
+        )
+
+        # Scaffold SMILES: molecule broken at BRICS bonds with [*] dummy atoms
+        scaffold_smi = Chem.MolToSmiles(broken, isomericSmiles=isomeric)
+    except Exception as e:
+        print(f"Error processing SMILES {smiles}: {e}")
+        scaffold_smi = ""
+
+    return scaffold_smi

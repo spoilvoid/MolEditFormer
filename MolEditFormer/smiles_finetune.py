@@ -238,6 +238,7 @@ if __name__ == "__main__":
     parser.add_argument("--template_path", type=str, default="template/template.txt")
     parser.add_argument("--version", type=str, default="v1", choices=["v1", "v2", "v3", "v4"])
     parser.add_argument("--dataset_mode", type=str, default="main", choices=["full", "main", "expand"])
+    parser.add_argument("--scaffold_hint", action="store_true")
     parser.add_argument("--max_num_pairs_per_task", type=int, default=25000)
     parser.add_argument("--validation_ratio", type=float, default=0.05)
     # dataloader config

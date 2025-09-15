@@ -20,7 +20,10 @@ from torch.utils.data import Dataset
 from torch_geometric.data import Data, InMemoryDataset
 
 from MolEditFormer.datasets import dataset_utils
-from MolEditFormer.datasets.dataset_utils import DESCRIPTION_MODE, RETRIEVAL_MODE, VERSION, TEXT_REQUIREMENTS_V1, TEXT_REQUIREMENTS_V2, TEXT_REQUIREMENTS_V3, TEXT_REQUIREMENTS_V4, LEVEL_LABELS_PROP_NAME, LEVEL_LABELS_PROP_EXPLANATION, TASK_REFERENCE
+from MolEditFormer.datasets.dataset_utils import DESCRIPTION_MODE, RETRIEVAL_MODE, VERSION
+from MolEditFormer.datasets.dataset_utils import TEXT_REQUIREMENTS_V1, TEXT_REQUIREMENTS_V2, TEXT_REQUIREMENTS_V3, TEXT_REQUIREMENTS_V4
+from MolEditFormer.datasets.dataset_utils import LEVEL_LABELS_PROP_NAME, LEVEL_LABELS_PROP_EXPLANATION, TASK_REFERENCE
+from MolEditFormer.datasets.dataset_utils import brics_scaffold_with_attachments, murcko_scaffold_with_attachments
 
 
 class MolPair_SingleGraph(InMemoryDataset):
@@ -145,7 +148,7 @@ class MolPair_PairGraph(InMemoryDataset):
 
 
 class MolPair_PairSmiles(Dataset):
-    def __init__(self, root, template_path, mode="main", max_num_pairs_per_task=40000, version="v1"):
+    def __init__(self, root, template_path, mode="main", max_num_pairs_per_task=40000, version="v1", scaffold_hint=False):
         self.template_path = template_path
         if mode not in DESCRIPTION_MODE:
             raise ValueError(f"Invalid mode: {mode}, choose from {DESCRIPTION_MODE}")
@@ -157,6 +160,7 @@ class MolPair_PairSmiles(Dataset):
         elif version in ["v3", "v4"]:
             self.root = osp.join(root, "tagged_"+version)
         self.version = version
+        self.scaffold_hint = scaffold_hint
         self.max_num_pairs_per_task = max_num_pairs_per_task
 
         self.PubchemEdit_filepath = osp.join(self.root, "raw", "description", "PubChemEdit.json")
@@ -235,6 +239,13 @@ class MolPair_PairSmiles(Dataset):
                         if match:
                             input_prop_num = match.group(1)
                             task_description = re.sub(r'\${output_level'+input_prop_num+'}', value, task_description)
+                if self.scaffold_hint:
+                    input_smiles_scaffold = murcko_scaffold_with_attachments(row["smiles1"])
+                    if input_smiles_scaffold == "":
+                        input_smiles_scaffold = brics_scaffold_with_attachments(row["smiles1"])
+                    if input_smiles_scaffold == "":
+                        task_description = re.sub(r' \${scaffold}', input_smiles_scaffold, task_description)
+                    task_description = re.sub(r'\${scaffold}', input_smiles_scaffold, task_description)
                 
                 self.description_list.append(description_dict[row["smiles1"]] + " " + task_description)
                 self.input_smiles_list.append(row["smiles1"])
