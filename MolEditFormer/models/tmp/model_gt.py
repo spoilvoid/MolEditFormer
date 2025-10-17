@@ -1,8 +1,9 @@
-from collections import OrderedDict
-from typing import Tuple, Union, List, Any
 import os
 import os.path as osp
 import numpy as np
+import copy
+from collections import OrderedDict
+from typing import Tuple, Union, List, Any
 from functools import partial
 
 import torch
@@ -63,7 +64,7 @@ class MolTextFuser(nn.Module):
         return mol_embedding
 
 
-class CLIP(nn.Module):
+class MolEditFormer(nn.Module):
     MOLECULE_TYPE_RANGE = ["2DGraph", "3DGraph", "SMILES", "all"]
     GRAPH2D_MOL_ARGS_RANGE = ["molecule_type", "gnn_emb_dim", "num_layer", "JK", "dropout_ratio", "gnn_type", "graph_pooling", "model_path"]
     GRAPH3D_MOL_ARGS_RANGE = ["molecule_type", "model_path"]
@@ -144,6 +145,7 @@ class CLIP(nn.Module):
                 state_dict = torch.load(self.CL_args.text2latent_path, map_location='cpu')
                 self.text2latent.load_state_dict(state_dict)
         elif self.mode in ["finetune", "edit"]:
+            self.molecule_model_tgt = copy.deepcopy(self.molecule_model)
             self.modality_fuser = MolTextFuser(
                 mol_dim=self.molecule_dim, text_dim=self.text_dim, 
                 num_layers=self.fuse_args.num_layers, num_heads=self.fuse_args.num_heads,
@@ -238,6 +240,11 @@ class CLIP(nn.Module):
         encode_input = {"encoder_input": smiles_token_ids, "encoder_pad_mask": smiles_mask}
         molecule_embedding = self.molecule_model.encode(encode_input)
         return molecule_embedding
+    
+    def encode_tgt_smiles(self, smiles_token_ids, smiles_mask):
+        encode_input = {"encoder_input": smiles_token_ids, "encoder_pad_mask": smiles_mask}
+        molecule_embedding = self.molecule_model_tgt.encode(encode_input)
+        return molecule_embedding
 
     def encode_text_from_pretrain_model(self, text_token_ids, text_mask):
         if not self.text_branch:
@@ -278,21 +285,26 @@ class CLIP(nn.Module):
             raise ValueError("batch_output_molecule should be provided in finetune mode")
         
         '''prepare tokens for each modality branch'''
-        # input_text_token_ids, input_text_mask: [batch_size, text_max_seq_len]
-        input_text_token_ids, input_text_mask = self.prepare_text_tokens(batch_input_text)
-        # text_embedding: [batch_size, text_max_seq_len, text_d_model], text_pooled_embedding: [batch_size, text_d_model]
-        text_embedding, text_pooled_embedding = self.encode_text_from_pretrain_model(input_text_token_ids, input_text_mask)
+        input_text_token_ids, input_text_mask = self.prepare_text_tokens(batch_input_text) # input_text_token_ids, input_text_mask: [batch_size, text_max_seq_len]
+        input_text_embedding, input_text_pooled_embedding = self.encode_text_from_pretrain_model(input_text_token_ids, input_text_mask) # input_text_embedding: [batch_size, text_max_seq_len, text_d_model], input_text_pooled_embedding: [batch_size, text_d_model]
+        # output_text_token_ids, output_text_mask: [batch_size, text_max_seq_len]
+        # output_text_embedding: [batch_size, text_max_seq_len, text_d_model], output_text_pooled_embedding: [batch_size, text_d_model]
+        if batch_output_text is not None:
+            output_text_token_ids, output_text_mask = self.prepare_text_tokens(batch_output_text)
+            # output_text_embedding, output_text_pooled_embedding = self.encode_text_from_pretrain_model(output_text_token_ids, output_text_mask)
+        else:
+            output_text_token_ids, output_text_mask = input_text_token_ids.clone(), input_text_mask.clone()
+            # output_text_embedding, output_text_pooled_embedding = input_text_embedding.clone(), input_text_pooled_embedding.clone()
 
         if self.mol_args.molecule_type in ["SMILES", "all"]:
-            # input_molecule_token_ids, molecule_mask: [mol_max_seq_len, batch_size]
-            input_molecule_token_ids, input_molecule_mask = self.prepare_smiles_tokens(batch_input_molecule)
-            # molecule_embedding: [mol_max_seq_len, batch_size, mol_d_model]
-            molecule_embedding = self.encode_smiles(input_molecule_token_ids, input_molecule_mask)
+            input_molecule_token_ids, input_molecule_mask = self.prepare_smiles_tokens(batch_input_molecule) # input_molecule_token_ids, molecule_mask: [mol_max_seq_len, batch_size]
+            input_molecule_embedding = self.encode_smiles(input_molecule_token_ids, input_molecule_mask) # input_molecule_embedding: [mol_max_seq_len, batch_size, mol_d_model]
             if batch_output_molecule is not None:
-                # batch_output_molecule: [mol_max_seq_len, batch_size]
                 output_molecule_token_ids, output_molecule_mask = self.prepare_smiles_tokens(batch_output_molecule)
+                output_molecule_embedding = self.encode_smiles(output_molecule_token_ids, output_molecule_mask)
             else:
                 output_molecule_token_ids, output_molecule_mask = input_molecule_token_ids.clone(), input_molecule_mask.clone()
+                output_molecule_embedding = input_molecule_embedding.clone()
         elif self.mol_args.molecule_type in ["2DGraph", "all"]:
             # molecule_repr = self.encode_graph(batch_molecule)
             pass
@@ -319,6 +331,7 @@ class CLIP(nn.Module):
             cl_loss, mask_loss = self._calc_pretrain_loss(molecule_latent=molecule_latent, text_latent=text_latent, target_token_ids=output_molecule_token_ids[1:, :], target_mask=output_molecule_mask[1:, :], token_output=token_output)
     
         elif self.mode == "finetune":
+            output_molecule_embedding = self.encode_smiles(input_molecule_token_ids, input_molecule_mask)
             fused_molecule_embedding = self.modality_fuser(molecule_embedding, text_embedding.transpose(0, 1), input_text_mask)
             
             if self.mol_args.molecule_type in ["SMILES", "all"]:
@@ -538,7 +551,7 @@ class CLIP(nn.Module):
                 torch.save(model_branch.state_dict(), osp.join(save_dir, f"{prefix}_{key}.pth"))
 
 
-class CLIP_pretrain_momentum(nn.Module):
+class MolEditFormer_pretrain_momentum(nn.Module):
     MOLECULE_TYPE_RANGE = ["2DGraph", "3DGraph", "SMILES", "all"]
     GRAPH2D_MOL_ARGS_RANGE = ["molecule_type", "gnn_emb_dim", "num_layer", "JK", "dropout_ratio", "gnn_type", "graph_pooling", "model_path"]
     GRAPH3D_MOL_ARGS_RANGE = ["molecule_type", "model_path"]

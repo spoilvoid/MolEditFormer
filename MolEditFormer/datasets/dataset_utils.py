@@ -1,4 +1,5 @@
 import random
+import re
 import numpy as np
 import networkx as nx
 
@@ -22,99 +23,83 @@ DESCRIPTION_MODE = ["full", "main", "expand"]
 RETRIEVAL_MODE = ["random", "iterative"]
 # v1: valued+prop_name, v2: valued+prop_explanation, v3: tagged+prop_name, v4: tagged+prop_explanation
 VERSION = ["v1", "v2", "v3", "v4"]
-TEXT_REQUIREMENTS_V1 = {
-    "101": "decrease logP",
-    "102": "increase logP",
-    "103": "increase QED",
-    "104": "decrease QED",
-    "105": "decrease TPSA",
-    "106": "increase TPSA",
-    "107": "increase HBA",
-    "108": "increase HBD",
-    "201": "decrease logP and increase HBA",
-    "202": "increase logP and increase HBA",
-    "203": "decrease logP and increase HBD",
-    "204": "increase logP and increase HBD",
-    "205": "decrease logP and decrease TPSA",
-    "206": "decrease logP and increase TPSA",
-    "QED_constrained_optimization": "increase QED to at least 0.9",
-    "PlogP_constrained_optimization": "increase PlogP as much as possible",
-    "COX2": "increase the binding affinity for the target",
-    "DRD2": "increase the binding affinity for the target",
-    "EGFR": "increase the binding affinity for the target",
-    "SARS_Cov_3C": "increase the binding affinity for the target",
-    "2QBR_active2active": "maintain pIC50 for the target at least 6.5 with certain activity while ${task_requirement}",
-    "2QBR_other": "increase pIC50 for the target ${task_requirement}",
+VALUE_TYPE = ["continuous", "discrete"]
+PROPERTY_TYPE = ["name", "explanation"]
+TASK_DICT = {
+    "101":{
+        "increase":[],
+        "decrease":["logP"],
+    },
+    "102":{
+        "increase":["logP"],
+        "decrease":[],
+    },
+    "103":{
+        "increase":["QED"],
+        "decrease":[],
+    },
+    "104":{
+        "increase":[],
+        "decrease":["QED"],
+    },
+    "105":{
+        "increase":[],
+        "decrease":["TPSA"],
+    },
+    "106":{
+        "increase":["TPSA"],
+        "decrease":[],
+    },
+    "107":{
+        "increase":["HBA"],
+        "decrease":[],
+    },
+    "108":{
+        "increase":["HBD"],
+        "decrease":[],
+    },
+    "201":{
+        "increase":["HBA"],
+        "decrease":["logP"],
+    },
+    "202":{
+        "increase":["logP", "HBA"],
+        "decrease":[],
+    },
+    "203":{
+        "increase":["HBD"],
+        "decrease":["logP"],
+    },
+    "204":{
+        "increase":["logP", "HBD"],
+        "decrease":[],
+    },
+    "205":{
+        "increase":[],
+        "decrease":["logP", "TPSA"],
+    },
+    "206":{
+        "increase":["TPSA"],
+        "decrease":["logP"],
+    },
 }
-TEXT_REQUIREMENTS_V2 = {
-    "101": "more soluble in water",
-    "102": "more insoluble in water",
-    "103": "more like a drug",
-    "104": "more unlike a drug",
-    "105": "more permeable",
-    "106": "less permeable",
-    "107": "more hydrogen bond acceptors",
-    "108": "more hydrogen bond donors",
-    "201": "more soluble in water and more hydrogen bond acceptors",
-    "202": "more insoluble in water and more hydrogen bond acceptors",
-    "203": "more soluble in water and more hydrogen bond donors",
-    "204": "more insoluble in water and more hydrogen bond donors",
-    "205": "more soluble in water and more permeable",
-    "206": "more soluble in water and less permeable",
-    "QED_constrained_optimization": "more like a drug to at least 0.9",
-    "PlogP_constrained_optimization": "more penalized insoluble in water as much as possible",
-    "COX2": "make the binding with the target stronger and more stable",
-    "DRD2": "make the binding with the target stronger and more stable",
-    "EGFR": "make the binding with the target stronger and more stable",
-    "SARS_Cov_3C": "make the binding with the target stronger and more stable",
+PROPERTY_EXPLANATION = {
+    "increase": "more",
+    "decrease": "less",
+    "logP": "solubility in water",
+    "QED": "drug-likeness",
+    "TPSA": "impermeability",
+    "HBA": "Hydrogen Bond Acceptors",
+    "HBD": "Hydrogen Bond Donors",
 }
-TEXT_REQUIREMENTS_V3 = {
-    "101": "decrease logP from ${input_level1} to ${output_level1}",
-    "102": "increase logP from ${input_level1} to ${output_level1}",
-    "103": "increase QED from ${input_level1} to ${output_level1}",
-    "104": "decrease QED from ${input_level1} to ${output_level1}",
-    "105": "decrease TPSA from ${input_level1} to ${output_level1}",
-    "106": "increase TPSA from ${input_level1} to ${output_level1}",
-    "107": "increase HBA from ${input_level1} to ${output_level1}",
-    "108": "increase HBD from ${input_level1} to ${output_level1}",
-    "201": "decrease logP from ${input_level1} to ${output_level1} and increase HBA from ${input_level2} to ${output_level2}",
-    "202": "increase logP from ${input_level1} to ${output_level1} and increase HBA from ${input_level2} to ${output_level2}",
-    "203": "decrease logP from ${input_level1} to ${output_level1} and increase HBD from ${input_level2} to ${output_level2}",
-    "204": "increase logP from ${input_level1} to ${output_level1} and increase HBD from ${input_level2} to ${output_level2}",
-    "205": "decrease logP from ${input_level1} to ${output_level1} and decrease TPSA from ${input_level2} to ${output_level2}",
-    "206": "decrease logP from ${input_level1} to ${output_level1} and increase TPSA from ${input_level2} to ${output_level2}",
-    "QED_constrained_optimization": "increase QED from high to extremely high",
-    "PlogP_constrained_optimization": "increase PlogP as much as possible",
-    "COX2": "increase the binding affinity for the target from ${input_level1} to ${output_level1}",
-    "DRD2": "increase the binding affinity for the target from ${input_level1} to ${output_level1}",
-    "EGFR": "increase the binding affinity for the target from ${input_level1} to ${output_level1}",
-    "SARS_Cov_3C": "increase the binding affinity for the target from ${input_level1} to ${output_level1}",
-    "2QBR_active2active": "maintain pIC50 for the target at least slightly high pIC50 with certain activity while ${task_requirement}",
-    "2QBR_other": "increase pIC50 for the target from ${input_level1} to ${output_level1}",
+LEVEL_LBAEL_GAP = {
+    "QED": 0.1,
+    "logP": 2,
+    "TPSA": 20,
+    "HBA": 2,
+    "HBD": 2,
 }
-TEXT_REQUIREMENTS_V4 = {
-    "101": "",
-    "102": "",
-    "103": "",
-    "104": "",
-    "105": "",
-    "106": "",
-    "107": "",
-    "108": "",
-    "201": "",
-    "202": "",
-    "203": "",
-    "204": "",
-    "205": "",
-    "206": "",
-    "QED_constrained_optimization": "",
-    "PlogP_constrained_optimization": "",
-    "COX2": "",
-    "DRD2": "",
-    "EGFR": "",
-    "SARS_Cov_3C": "",
-}
-LEVEL_LABELS_PROP_NAME = {
+LEVEL_LABELS_PROPERTY_NAME = {
     "QED": {
         (0, 0.1): "almost no QED",
         (0.1, 0.2): "extremely Low QED",
@@ -178,25 +163,25 @@ LEVEL_LABELS_PROP_NAME = {
         (4, 6): "high PlogP",
         (6, "+inf"): "very high PlogP",
     },
-    "vina_affinity": {
-        ("-inf", -11): "very high binding affinity",
-        (-11, -9): "high binding affinity",
-        (-9, -7): "moderate binding affinity",
-        (-7, -5): "low binding affinity",
-        (-5, "+inf"): "almost no binding affinity",
-    },
-    "pIC50": {
-        ("-inf", 4.5): "very low pIC50 with certain inactivity",
-        (4.5, 5): "low pIC50 with certain inactivity",
-        (5, 5.5): "slightly low pIC50 with certain inactivity",
-        (5.5, 6): "moderate pIC50 with activity uncertain but leaning toward inactive",
-        (6, 6.5): "moderate pIC50 with activity uncertain but leaning toward active",
-        (6.5, 7): "slightly high pIC50 with certain activity",
-        (7, 7.5): "high pIC50 with certain activity",
-        (7.5, "+inf"): "very high pIC50 with certain activity",
-    },
+    # "vina_affinity": {
+    #     ("-inf", -11): "very high binding affinity",
+    #     (-11, -9): "high binding affinity",
+    #     (-9, -7): "moderate binding affinity",
+    #     (-7, -5): "low binding affinity",
+    #     (-5, "+inf"): "almost no binding affinity",
+    # },
+    # "pIC50": {
+    #     ("-inf", 4.5): "very low pIC50 with certain inactivity",
+    #     (4.5, 5): "low pIC50 with certain inactivity",
+    #     (5, 5.5): "slightly low pIC50 with certain inactivity",
+    #     (5.5, 6): "moderate pIC50 with activity uncertain but leaning toward inactive",
+    #     (6, 6.5): "moderate pIC50 with activity uncertain but leaning toward active",
+    #     (6.5, 7): "slightly high pIC50 with certain activity",
+    #     (7, 7.5): "high pIC50 with certain activity",
+    #     (7.5, "+inf"): "very high pIC50 with certain activity",
+    # },
 }
-LEVEL_LABELS_PROP_EXPLANATION = {
+LEVEL_LABELS_PROPERTY_EXPLANATION = {
     "QED": {
         (0, 0.1): "not a drug",
         (0.1, 0.2): "extremely not like a drug",
@@ -260,46 +245,23 @@ LEVEL_LABELS_PROP_EXPLANATION = {
         (4, 6): "penalized insoluble in water",
         (6, "+inf"): "practically penalized insoluble in water",
     },
-    "vina_affinity": {
-        ("-inf", -11): "very high binding to the target",
-        (-11, -9): "high binding to the target",
-        (-9, -7): "moderate binding to the target",
-        (-7, -5): "low binding to the target",
-        (-5, "+inf"): "almost no binding to the target",
-    },
-    "pIC50": {
-        ("-inf", 4.5): "very low binding affinity with certain inactivity",
-        (4.5, 5): "low binding affinity with certain inactivity",
-        (5, 5.5): "slightly low binding affinity with certain inactivity",
-        (5.5, 6): "moderate binding affinity with activity uncertain but leaning toward inactive",
-        (6, 6.5): "moderate binding affinity with activity uncertain but leaning toward active",
-        (6.5, 7): "slightly high binding affinity with certain activity",
-        (7, 7.5): "high binding affinity with certain activity",
-        (7.5, "+inf"): "very high binding affinity with certain activity",
-    },
-}
-TASK_REFERENCE = {
-    "101": {"input_level1": "logP"},
-    "102": {"input_level1": "logP"},
-    "103": {"input_level1": "QED"},
-    "104": {"input_level1": "QED"},
-    "105": {"input_level1": "TPSA"},
-    "106": {"input_level1": "TPSA"},
-    "107": {"input_level1": "HBA"},
-    "108": {"input_level1": "HBD"},
-    "201": {"input_level1": "logP", "input_level2": "HBA"},
-    "202": {"input_level1": "logP", "input_level2": "HBA"},
-    "203": {"input_level1": "logP", "input_level2": "HBD"},
-    "204": {"input_level1": "logP", "input_level2": "HBD"},
-    "205": {"input_level1": "logP", "input_level2": "TPSA"},
-    "206": {"input_level1": "logP", "input_level2": "TPSA"},
-    "QED_constrained_optimization": {"input_level1": "QED"},
-    "PlogP_constrained_optimization": {"input_level1": "PlogP"},
-    "COX2": {"input_level1": "binding_affinity"},
-    "DRD2": {"input_level1": "binding_affinity"},
-    "EGFR": {"input_level1": "binding_affinity"},
-    "SARS_Cov_3C": {"input_level1": "binding_affinity"},
-    "2QBR": {"input_level1": "pIC50"},
+    # "vina_affinity": {
+    #     ("-inf", -11): "very high binding to the target",
+    #     (-11, -9): "high binding to the target",
+    #     (-9, -7): "moderate binding to the target",
+    #     (-7, -5): "low binding to the target",
+    #     (-5, "+inf"): "almost no binding to the target",
+    # },
+    # "pIC50": {
+    #     ("-inf", 4.5): "very low binding affinity with certain inactivity",
+    #     (4.5, 5): "low binding affinity with certain inactivity",
+    #     (5, 5.5): "slightly low binding affinity with certain inactivity",
+    #     (5.5, 6): "moderate binding affinity with activity uncertain but leaning toward inactive",
+    #     (6, 6.5): "moderate binding affinity with activity uncertain but leaning toward active",
+    #     (6.5, 7): "slightly high binding affinity with certain activity",
+    #     (7, 7.5): "high binding affinity with certain activity",
+    #     (7.5, "+inf"): "very high binding affinity with certain activity",
+    # },
 }
 
 
@@ -567,3 +529,20 @@ def brics_scaffold_with_attachments(smiles: str, isomeric: bool=True):
         scaffold_smi = ""
 
     return scaffold_smi
+
+
+def get_scaffold(smiles: str) -> str:
+    return (murcko_scaffold_with_attachments(smiles) or brics_scaffold_with_attachments(smiles) or "")
+
+
+def get_property_label(x: float, property_name: str, level_dict: dict = LEVEL_LABELS_PROPERTY_NAME) -> str:
+    if property_name not in level_dict:
+        raise ValueError(f"Property '{property_name}' not found in level_dict.")
+    
+    bins = level_dict[property_name]
+    for (low, high), label in bins.items():
+        low = float('-inf') if low == '-inf' else low
+        high = float('inf') if high == '+inf' else high
+        if low <= x < high:
+            return label
+    return "out of range"

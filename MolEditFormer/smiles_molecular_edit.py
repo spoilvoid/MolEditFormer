@@ -16,13 +16,13 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.optim.lr_scheduler import _LRScheduler
 from torch.utils.data import DataLoader
-from torch.utils.tensorboard import SummaryWriter
+from tensorboardX import SummaryWriter
 
 from transformers import AutoModel, AutoTokenizer
 
 from MolEditFormer.utils.basic_utils import get_local_time, seed_all, Logger
-from MolEditFormer.utils.molecule_edit_utils import HARD_THRESHOLD_DICT, evaluate_molecular_edit_result
-from MolEditFormer.models import CLIP
+from MolEditFormer.utils.molecule_edit_utils import SOFT_THRESHOLD_DICT, HARD_THRESHOLD_DICT, evaluate_molecular_edit_result
+from MolEditFormer.models import MolEditFormer_finetune
 from MolEditFormer.datasets import MolPair_PairSmiles_Test
 
 
@@ -56,7 +56,7 @@ def main(args):
         "model_path": args.text_model_path,
     }
 
-    model = CLIP(
+    model = MolEditFormer_finetune(
         mol_branch=args.mol_branch,
         text_branch=args.text_branch,
         mode=args.model_mode,
@@ -67,10 +67,17 @@ def main(args):
     ).to(device)
     model.eval()
 
+    if args.hard_threshold:
+        threshold_dict = HARD_THRESHOLD_DICT[str(args.task_id)]
+        result_filepath = osp.join(result_save_dir, f"task_{args.task_id}_hard_threshold_results.json")
+    else:
+        threshold_dict = SOFT_THRESHOLD_DICT[str(args.task_id)]
+        result_filepath = osp.join(result_save_dir, f"task_{args.task_id}_soft_threshold_results.json")
+    
     if args.dataset_mode == "random":
-        test_set = MolPair_PairSmiles_Test(root=args.data_dir, template_path=args.template_path, task_id=args.task_id, mode="random", version=args.version)
+        test_set = MolPair_PairSmiles_Test(root=args.data_dir, template_path=args.template_path, task_id=args.task_id, value_type=args.value_type, property_type=args.property_type, mode="random", threshold_dict=threshold_dict, scaffold_hint=args.scaffold_hint)
     elif args.dataset_mode in ["iterative", "vote"]:
-        test_set = MolPair_PairSmiles_Test(root=args.data_dir, template_path=args.template_path, task_id=args.task_id, mode="iterative", version=args.version)
+        test_set = MolPair_PairSmiles_Test(root=args.data_dir, template_path=args.template_path, task_id=args.task_id, value_type=args.value_type, property_type=args.property_type, mode="iterative", threshold_dict=threshold_dict, scaffold_hint=args.scaffold_hint)
     test_loader = DataLoader(test_set, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
 
     original_smiles_list, result_smiles_list = [], []
@@ -82,19 +89,12 @@ def main(args):
 
         original_smiles_list.extend(input_molecule_batched)
         result_smiles_list.extend(edited_molecule_batched)
-
-    if args.hard_threshold:
-        threshold_list = HARD_THRESHOLD_DICT[args.task_id]
-        result_filepath = osp.join(result_save_dir, f"task_{args.task_id}_hard_threshold_results.json")
-    else:
-        threshold_list = [0 for _ in range(len(HARD_THRESHOLD_DICT[args.task_id]))]
-        result_filepath = osp.join(result_save_dir, f"task_{args.task_id}_soft_threshold_results.json")
         
     if args.dataset_mode in ["random", "iterative"]:
         distinct_input_smiles_list = list(set(original_smiles_list))
         result_dict = {input_smi: {"invalid":[], "unsatisfied":[], "successful":[]} for input_smi in distinct_input_smiles_list}
         for input_smi, output_smi in zip(original_smiles_list, result_smiles_list):
-            result, reason = evaluate_molecular_edit_result(input_smi, output_smi, task_id=args.task_id, threshold_list=threshold_list)
+            result, reason = evaluate_molecular_edit_result(input_smi, output_smi, task_id=args.task_id, threshold_dict=threshold_dict)
             if result:
                 result_dict[input_smi]["successful"].append(output_smi)
             elif "invalid" in reason:
@@ -133,7 +133,7 @@ def main(args):
             for k in range(1, 11):
                 if len(vote_dict[input_smi]) >= k:
                     output_smi = vote_dict[input_smi][k-1][0]
-                    _, reason = evaluate_molecular_edit_result(input_smi, output_smi, task_id=args.task_id, threshold_list=threshold_list)
+                    _, reason = evaluate_molecular_edit_result(input_smi, output_smi, task_id=args.task_id, threshold_dict=threshold_dict)
                 else:
                     output_smi = ""
                     reason = "not enough candidates"
@@ -168,7 +168,9 @@ if __name__ == "__main__":
     parser.add_argument("--data_dir", type=str, default="data/EditBenchmark/zero_shot")
     parser.add_argument("--dataset_mode", type=str, default="random", choices=["random", "iterative", "vote"])
     parser.add_argument("--template_path", type=str, default="template/template.txt")
-    parser.add_argument("--version", type=str, default="v1", choices=["v1", "v2", "v3", "v4"])
+    parser.add_argument("--value_type", type=str, default="continuous", choices=["continuous", "discrete"])
+    parser.add_argument("--property_type", type=str, default="name", choices=["name", "explanation"])
+    parser.add_argument("--scaffold_hint", action="store_true")
     parser.add_argument("--task_id", type=int, default=101, choices=list(range(101, 109))+list(range(201, 207)))
     parser.add_argument("--hard_threshold", dest='hard_threshold', action='store_true')
     parser.add_argument('--soft_threshold', dest='hard_threshold', action='store_false')

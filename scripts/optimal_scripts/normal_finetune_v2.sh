@@ -1,0 +1,27 @@
+python3 -m MolEditFormer.smiles_finetune \
+    --log_freq 500 \
+    --model_mode finetune \
+    --text_tokenizer_dir ckpt/SciBERT \
+    --text_model_path ckpt/MolEditFormer/pretrain/Mixed-PubChemEdit-ZINC250K-Tagged-V3-SMILE-Decoder-April-02-2025/best_text_model.pth \
+    --mol_model_path ckpt/MolEditFormer/pretrain/Mixed-PubChemEdit-ZINC250K-Tagged-V3-SMILE-Decoder-April-02-2025/best_molecule_model.pth \
+    --text_projector_path ckpt/MolEditFormer/pretrain/Mixed-PubChemEdit-ZINC250K-Tagged-V3-SMILE-Decoder-April-02-2025/best_text2latent.pth \
+    --mol_projector_path ckpt/MolEditFormer/pretrain/Mixed-PubChemEdit-ZINC250K-Tagged-V3-SMILE-Decoder-April-02-2025/best_mol2latent.pth \
+    --scaffold_hint \
+    --template_path template/scaffold_template.txt \
+    --dataset_mode main \
+    --value_type discrete \
+    --property_type name \
+    --data_dir data/MolPair/mol_pair/v2 \
+    --max_num_pairs_per_task 10000 \
+    --batch_size 16 \
+    --store_dir ckpt/MolEditFormer/finetune \
+    --dir_name Mixed-MolPair-Tagged-V3-SMILE-Decoder-April-02-2025 \
+    --num_layers 4 \
+    --num_heads 8 \
+    --dropout 0.1 \
+    --validation_ratio 0.05 \
+    --epoch_num 20 \
+    --text_lr 2e-5 \
+    --fuser_lr 1e-4 \
+    --seed 42 \
+    --gpu 0

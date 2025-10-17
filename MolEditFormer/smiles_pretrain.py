@@ -14,53 +14,53 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.optim.lr_scheduler import _LRScheduler
 from torch.utils.data import random_split, DataLoader
-from torch.utils.tensorboard import SummaryWriter
+from tensorboardX import SummaryWriter
 
 from transformers import AutoModel, AutoTokenizer
 
 from MolEditFormer.utils.basic_utils import get_local_time, seed_all, Logger
 from MolEditFormer.utils.molecule_edit_utils import get_can_smiles
-from MolEditFormer.models import CLIP
+from MolEditFormer.models import MolEditFormer_pretrain
 # from MolEditFormer.datasets import PubChemEdit, PubChemEdit_ZINC250k
 from MolEditFormer.datasets import PubChemEdit_ZINC250k
 
 
-class epoch_based_WarmupCosineLR(_LRScheduler):
-    def __init__(self, optimizer, warmup_epochs, total_epochs, last_epoch=-1):
-        self.warmup_epochs = warmup_epochs
-        self.total_epochs = total_epochs
-        super(epoch_based_WarmupCosineLR, self).__init__(optimizer, last_epoch)
+# class epoch_based_WarmupCosineLR(_LRScheduler):
+#     def __init__(self, optimizer, warmup_epochs, total_epochs, last_epoch=-1):
+#         self.warmup_epochs = warmup_epochs
+#         self.total_epochs = total_epochs
+#         super(epoch_based_WarmupCosineLR, self).__init__(optimizer, last_epoch)
 
-    def get_lr(self):
-        if self.last_epoch < self.warmup_epochs:
-            # 线性增加学习率
-            return [base_lr * (self.last_epoch + 1) / self.warmup_epochs for base_lr in self.base_lrs]
-        else:
-            # 余弦退火学习率
-            return [
-                base_lr * 0.5 * (1 + math.cos(
-                    math.pi * (self.last_epoch - self.warmup_epochs) / (self.total_epochs - self.warmup_epochs)
-                )) for base_lr in self.base_lrs
-            ]
+#     def get_lr(self):
+#         if self.last_epoch < self.warmup_epochs:
+#             # 线性增加学习率
+#             return [base_lr * (self.last_epoch + 1) / self.warmup_epochs for base_lr in self.base_lrs]
+#         else:
+#             # 余弦退火学习率
+#             return [
+#                 base_lr * 0.5 * (1 + math.cos(
+#                     math.pi * (self.last_epoch - self.warmup_epochs) / (self.total_epochs - self.warmup_epochs)
+#                 )) for base_lr in self.base_lrs
+#             ]
         
 
-class batch_based_WarmupCosineLR_step(_LRScheduler):
-    def __init__(self, optimizer, warmup_steps, total_steps, last_epoch=-1):
-        self.warmup_steps = warmup_steps
-        self.total_steps = total_steps
-        super(batch_based_WarmupCosineLR_step, self).__init__(optimizer, last_epoch)
+# class batch_based_WarmupCosineLR_step(_LRScheduler):
+#     def __init__(self, optimizer, warmup_steps, total_steps, last_epoch=-1):
+#         self.warmup_steps = warmup_steps
+#         self.total_steps = total_steps
+#         super(batch_based_WarmupCosineLR_step, self).__init__(optimizer, last_epoch)
 
-    def get_lr(self):
-        current_step = self.last_epoch + 1
+#     def get_lr(self):
+#         current_step = self.last_epoch + 1
 
-        if current_step <= self.warmup_steps:
-            # 线性增加学习率
-            return [base_lr * current_step / self.warmup_steps for base_lr in self.base_lrs]
-        else:
-            # 余弦退火学习率
-            progress = (current_step - self.warmup_steps) / (self.total_steps - self.warmup_steps)
-            cosine_decay = 0.5 * (1 + math.cos(math.pi * progress))
-            return [base_lr * cosine_decay for base_lr in self.base_lrs]
+#         if current_step <= self.warmup_steps:
+#             # 线性增加学习率
+#             return [base_lr * current_step / self.warmup_steps for base_lr in self.base_lrs]
+#         else:
+#             # 余弦退火学习率
+#             progress = (current_step - self.warmup_steps) / (self.total_steps - self.warmup_steps)
+#             cosine_decay = 0.5 * (1 + math.cos(math.pi * progress))
+#             return [base_lr * cosine_decay for base_lr in self.base_lrs]
 
 
 def main(args):
@@ -71,8 +71,7 @@ def main(args):
         model_save_dir = osp.join(args.store_dir, f"{args.data_source}_{args.molecule_type}")
     else:
         model_save_dir = osp.join(args.store_dir, args.dir_name)
-    if not osp.exists(model_save_dir):
-        os.makedirs(model_save_dir)
+    os.makedirs(model_save_dir, exist_ok=True)
     logger = Logger(osp.join(model_save_dir, "log"), args.time_log)
     writer = SummaryWriter(osp.join(model_save_dir, "tensorboard"))
 
@@ -98,7 +97,7 @@ def main(args):
         "model_path": args.text_model_path,
     }
 
-    model = CLIP(
+    model = MolEditFormer_pretrain(
         mol_branch=args.mol_branch,
         text_branch=args.text_branch,
         mode=args.model_mode,
@@ -121,10 +120,10 @@ def main(args):
         mixed_config = None
 
     if args.validation_ratio == 0:
-        train_set = PubChemEdit_ZINC250k(args.data_dir, mode=args.dataset_mode, version=args.version, mixed=args.mixed, mixed_config=mixed_config)
+        train_set = PubChemEdit_ZINC250k(args.data_dir, value_type=args.value_type, property_type=args.property_type, mode=args.dataset_mode, mixed=args.mixed, mixed_config=mixed_config, scaffold_hint=args.scaffold_hint)
         train_loader = DataLoader(train_set, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
     elif 0 < args.validation_ratio < 1:
-        dataset = PubChemEdit_ZINC250k(args.data_dir, mode=args.dataset_mode, version=args.version, mixed=args.mixed, mixed_config=mixed_config)
+        dataset = PubChemEdit_ZINC250k(args.data_dir, value_type=args.value_type, property_type=args.property_type, mode=args.dataset_mode, mixed=args.mixed, mixed_config=mixed_config, scaffold_hint=args.scaffold_hint)
         dataset_size = len(dataset)
         val_size = int(dataset_size * args.validation_ratio)
         train_size = dataset_size - val_size
@@ -148,14 +147,14 @@ def main(args):
     }
     optimizer = optim.Adam(model_param_group, weight_decay=args.weight_decay)
 
-    if args.warmup_choice == "no":
-        pass
-    elif args.warmup_choice == "epoch":
-        scheduler = epoch_based_WarmupCosineLR(optimizer, warmup_epochs=args.warmup_epoch, total_epochs=args.epoch_num)
-    elif args.warmup_choice == "batch":
-        scheduler = batch_based_WarmupCosineLR_step(optimizer, warmup_steps=args.warmup_batch, total_steps=args.epoch_num * len(train_loader))
-    else:
-        raise ValueError("Invalid warmup choice")
+    # if args.warmup_choice == "no":
+    #     pass
+    # elif args.warmup_choice == "epoch":
+    #     scheduler = epoch_based_WarmupCosineLR(optimizer, warmup_epochs=args.warmup_epoch, total_epochs=args.epoch_num)
+    # elif args.warmup_choice == "batch":
+    #     scheduler = batch_based_WarmupCosineLR_step(optimizer, warmup_steps=args.warmup_batch, total_steps=args.epoch_num * len(train_loader))
+    # else:
+    #     raise ValueError("Invalid warmup choice")
 
     optimal_loss = args.loss_threshold
     for epoch_id in range(args.start_epoch, args.epoch_num):
@@ -173,8 +172,8 @@ def main(args):
             torch.cuda.empty_cache()
             all_loss.backward()
             optimizer.step()
-            if args.warmup_choice == "batch":
-                scheduler.step()
+            # if args.warmup_choice == "batch":
+            #     scheduler.step()
 
             # information record and save model
             loss = round((all_loss.detach().clone()).cpu().item(), 4)
@@ -187,8 +186,8 @@ def main(args):
                     model.save_model(model_save_dir, f"epoch{epoch_id}_batch{i_batch+1}", save_config)
             epoch_loss += loss / len(train_loader)
 
-        if args.warmup_choice == "epoch":
-            scheduler.step()
+        # if args.warmup_choice == "epoch":
+        #     scheduler.step()
 
         logger.log("{}th epoch mean loss:{}".format(epoch_id + 1, epoch_loss))
         writer.add_scalar("Train_Loss/epoch", epoch_loss, epoch_id + 1)
@@ -243,8 +242,10 @@ if __name__ == "__main__":
     # dataset config
     parser.add_argument("--data_dir", type=str, default="data/PubChemEdit_ZINC250k")
     parser.add_argument("--dataset_mode", type=str, default="main", choices=["full", "main", "expand"])
-    parser.add_argument("--version", type=str, default="v1", choices=["v1", "v2", "v3", "v4"])
+    parser.add_argument("--value_type", type=str, default="continuous", choices=["continuous", "discrete"])
+    parser.add_argument("--property_type", type=str, default="name", choices=["name", "explanation"])
     parser.add_argument("--mixed", action="store_true")
+    parser.add_argument("--scaffold_hint", action="store_true")
     parser.add_argument("--can2can_ratio", type=float, default=1.0)
     parser.add_argument("--non2can_ratio", type=float, default=0.0)
     parser.add_argument("--non2non_ratio", type=float, default=0.0)
@@ -257,7 +258,7 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--gpu", type=int, default=1)
     parser.add_argument("--start_epoch", type=int, default=0)
-    parser.add_argument("--warmup_choice", type=str, default="no", choices=["no", "epoch", "batch"])
+    # parser.add_argument("--warmup_choice", type=str, default="no", choices=["no", "epoch", "batch"])
     parser.add_argument("--warmup_epoch", type=int, default=10, help="epoch start to warmup")
     parser.add_argument("--warmup_batch", type=int, default=5000, help="batch start to warmup")
     parser.add_argument("--epoch_num", type=int, default=32, help="epoch number")

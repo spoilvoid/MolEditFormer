@@ -4,7 +4,8 @@ from .mega_molbart.mega_mol_bart import MegaMolBART
 # from .molecule_gnn_model import GNN, GNN_graphpred
 # from .MLP import MLP
 from .model_utils import MLP
-from .model_gt import CLIP, CLIP_pretrain_momentum
+from .model_pretrain import MolEditFormer_pretrain
+from .model_finetune import MolEditFormer_finetune
 
-# __all__ = ["SimpleTokenizer", "MegaMolBART", "GNN_graphpred", "MLP", "CLIP"]
-__all__ = ["MegaMolBART", "MLP", "CLIP", "CLIP_pretrain_momentum"]
+# __all__ = ["SimpleTokenizer", "MegaMolBART", "GNN_graphpred", "MLP", "MolEditFormer"]
+# __all__ = ["MegaMolBART", "MLP", "MolEditFormer_pretrain", "MolEditFormer_finetune"]

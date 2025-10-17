@@ -15,78 +15,78 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.optim.lr_scheduler import _LRScheduler
 from torch.utils.data import random_split, DataLoader
-from torch.utils.tensorboard import SummaryWriter
+from tensorboardX import SummaryWriter
 
 from transformers import AutoModel, AutoTokenizer
 
 from MolEditFormer.utils.basic_utils import get_local_time, seed_all, Logger
 from MolEditFormer.utils.molecule_edit_utils import evaluate_molecular_edit_result
-from MolEditFormer.models import CLIP
+from MolEditFormer.models import MolEditFormer_finetune
 from MolEditFormer.datasets import MolPair_PairGraph, MolPair_PairSmiles
-from MolEditFormer.datasets.dataset_utils import TEXT_REQUIREMENTS_V1, TEXT_REQUIREMENTS_V2, TEXT_REQUIREMENTS_V3, TEXT_REQUIREMENTS_V4
+# from MolEditFormer.datasets.dataset_utils import TEXT_REQUIREMENTS_V1, TEXT_REQUIREMENTS_V2, TEXT_REQUIREMENTS_V3, TEXT_REQUIREMENTS_V4
 
 
-def get_task_id_from_description(description, version):
-    if version == "v1":
-        requirement_format_dict = TEXT_REQUIREMENTS_V1
-    elif version == "v2":
-        requirement_format_dict = TEXT_REQUIREMENTS_V2
-    elif version == "v3":
-        requirement_format_dict = TEXT_REQUIREMENTS_V3
-    elif version == "v4":
-        requirement_format_dict = TEXT_REQUIREMENTS_V4
+# def get_task_id_from_description(description, version):
+#     if version == "v1":
+#         requirement_format_dict = TEXT_REQUIREMENTS_V1
+#     elif version == "v2":
+#         requirement_format_dict = TEXT_REQUIREMENTS_V2
+#     elif version == "v3":
+#         requirement_format_dict = TEXT_REQUIREMENTS_V3
+#     elif version == "v4":
+#         requirement_format_dict = TEXT_REQUIREMENTS_V4
     
-    for task_id in range(201, 207):
-        requirement_format = requirement_format_dict[task_id]
-        pattern = requirement_format.replace("${input_level1}", "(.*?)").replace("${output_level1}", "(.*?)").replace("${input_level2}", "(.*?)").replace("${output_level2}", "(.*?)")
-        match = re.search(pattern, description)
-        if match:
-            return task_id
+#     for task_id in range(201, 207):
+#         requirement_format = requirement_format_dict[task_id]
+#         pattern = requirement_format.replace("${input_level1}", "(.*?)").replace("${output_level1}", "(.*?)").replace("${input_level2}", "(.*?)").replace("${output_level2}", "(.*?)")
+#         match = re.search(pattern, description)
+#         if match:
+#             return task_id
     
-    for task_id in range(101, 109):
-        requirement_format = requirement_format_dict[task_id]
-        pattern = requirement_format.replace("${input_level1}", "(.*?)").replace("${output_level1}", "(.*?)").replace("${input_level2}", "(.*?)").replace("${output_level2}", "(.*?)")
-        match = re.search(pattern, description)
-        if match:
-            return task_id
+#     for task_id in range(101, 109):
+#         requirement_format = requirement_format_dict[task_id]
+#         pattern = requirement_format.replace("${input_level1}", "(.*?)").replace("${output_level1}", "(.*?)").replace("${input_level2}", "(.*?)").replace("${output_level2}", "(.*?)")
+#         match = re.search(pattern, description)
+#         if match:
+#             return task_id
         
 
-class epoch_based_WarmupCosineLR(_LRScheduler):
-    def __init__(self, optimizer, warmup_epochs, total_epochs, last_epoch=-1):
-        self.warmup_epochs = warmup_epochs
-        self.total_epochs = total_epochs
-        super(epoch_based_WarmupCosineLR, self).__init__(optimizer, last_epoch)
+# class epoch_based_WarmupCosineLR(_LRScheduler):
+#     def __init__(self, optimizer, warmup_epochs, total_epochs, last_epoch=-1):
+#         self.warmup_epochs = warmup_epochs
+#         self.total_epochs = total_epochs
+#         super(epoch_based_WarmupCosineLR, self).__init__(optimizer, last_epoch)
 
-    def get_lr(self):
-        if self.last_epoch < self.warmup_epochs:
-            # 线性增加学习率
-            return [base_lr * (self.last_epoch + 1) / self.warmup_epochs for base_lr in self.base_lrs]
-        else:
-            # 余弦退火学习率
-            return [
-                base_lr * 0.5 * (1 + math.cos(
-                    math.pi * (self.last_epoch - self.warmup_epochs) / (self.total_epochs - self.warmup_epochs)
-                )) for base_lr in self.base_lrs
-            ]
+#     def get_lr(self):
+#         if self.last_epoch < self.warmup_epochs:
+#             # 线性增加学习率
+#             return [base_lr * (self.last_epoch + 1) / self.warmup_epochs for base_lr in self.base_lrs]
+#         else:
+#             # 余弦退火学习率
+#             return [
+#                 base_lr * 0.5 * (1 + math.cos(
+#                     math.pi * (self.last_epoch - self.warmup_epochs) / (self.total_epochs - self.warmup_epochs)
+#                 )) for base_lr in self.base_lrs
+#             ]
         
 
-class batch_based_WarmupCosineLR_step(_LRScheduler):
-    def __init__(self, optimizer, warmup_steps, total_steps, last_epoch=-1):
-        self.warmup_steps = warmup_steps
-        self.total_steps = total_steps
-        super(batch_based_WarmupCosineLR_step, self).__init__(optimizer, last_epoch)
+# class batch_based_WarmupCosineLR_step(_LRScheduler):
+#     def __init__(self, optimizer, warmup_steps, total_steps, last_epoch=-1):
+#         self.warmup_steps = warmup_steps
+#         self.total_steps = total_steps
+#         super(batch_based_WarmupCosineLR_step, self).__init__(optimizer, last_epoch)
 
-    def get_lr(self):
-        current_step = self.last_epoch + 1
+#     def get_lr(self):
+#         current_step = self.last_epoch + 1
 
-        if current_step <= self.warmup_steps:
-            # 线性增加学习率
-            return [base_lr * current_step / self.warmup_steps for base_lr in self.base_lrs]
-        else:
-            # 余弦退火学习率
-            progress = (current_step - self.warmup_steps) / (self.total_steps - self.warmup_steps)
-            cosine_decay = 0.5 * (1 + math.cos(math.pi * progress))
-            return [base_lr * cosine_decay for base_lr in self.base_lrs]
+#         if current_step <= self.warmup_steps:
+#             # 线性增加学习率
+#             return [base_lr * current_step / self.warmup_steps for base_lr in self.base_lrs]
+#         else:
+#             # 余弦退火学习率
+#             progress = (current_step - self.warmup_steps) / (self.total_steps - self.warmup_steps)
+#             cosine_decay = 0.5 * (1 + math.cos(math.pi * progress))
+#             return [base_lr * cosine_decay for base_lr in self.base_lrs]
 
 
 def main(args):
@@ -102,12 +102,6 @@ def main(args):
     logger = Logger(osp.join(model_save_dir, "log"), args.time_log)
     writer = SummaryWriter(osp.join(model_save_dir, "tensorboard"))
 
-    fuse_args = {
-        "num_layers": args.num_layers,
-        "num_heads": args.num_heads,
-        "dropout": args.dropout,
-        "model_path": args.fuser_path,
-    }
     mol_args = {
         "molecule_type": args.molecule_type,
         "smiles_emb_dim": args.smiles_emb_dim, 
@@ -120,22 +114,38 @@ def main(args):
         "tokenizer_dir": args.text_tokenizer_dir,
         "model_path": args.text_model_path,
     }
+    CL_args = {
+        "CL_emb_dim": args.SSL_emb_dim,
+        "CL_loss": args.SSL_loss,
+        "CL_neg_samples": args.CL_neg_samples,
+        "T": args.T,
+        "normalize": args.normalize,
+        "mol2latent_path": args.mol_projector_path, 
+        "text2latent_path": args.text_projector_path,
+    }
+    fuse_args = {
+        "num_layers": args.num_layers,
+        "num_heads": args.num_heads,
+        "dropout": args.dropout,
+        "model_path": args.fuser_path,
+    }
 
-    model = CLIP(
+    model = MolEditFormer_finetune(
         mol_branch=args.mol_branch,
         text_branch=args.text_branch,
         mode=args.model_mode,
         device=device,
         mol_args=mol_args,
         text_args=text_args,
+        CL_args=CL_args,
         fuse_args=fuse_args,
     ).to(device)
 
     if args.validation_ratio == 0:
-        train_set = MolPair_PairSmiles(args.data_dir, args.template_path, mode=args.dataset_mode, max_num_pairs_per_task=args.max_num_pairs_per_task, version=args.version)
+        train_set = MolPair_PairSmiles(root=args.data_dir, template_path=args.template_path, mode=args.dataset_mode, value_type=args.value_type, property_type=args.property_type, max_num_pairs_per_task=args.max_num_pairs_per_task, scaffold_hint=args.scaffold_hint)
         train_loader = DataLoader(train_set, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
     elif 0 < args.validation_ratio < 1:
-        dataset = MolPair_PairSmiles(args.data_dir, args.template_path, mode=args.dataset_mode, max_num_pairs_per_task=args.max_num_pairs_per_task, version=args.version)
+        dataset = MolPair_PairSmiles(root=args.data_dir, template_path=args.template_path, mode=args.dataset_mode, value_type=args.value_type, property_type=args.property_type, max_num_pairs_per_task=args.max_num_pairs_per_task, scaffold_hint=args.scaffold_hint)
         dataset_size = len(dataset)
         val_size = int(dataset_size * args.validation_ratio)
         train_size = dataset_size - val_size
@@ -155,14 +165,14 @@ def main(args):
     }
     optimizer = optim.Adam(model_param_group, weight_decay=args.weight_decay)
 
-    if args.warmup_choice == "no":
-        pass
-    elif args.warmup_choice == "epoch":
-        scheduler = epoch_based_WarmupCosineLR(optimizer, warmup_epochs=args.warmup_epoch, total_epochs=args.epoch_num)
-    elif args.warmup_choice == "batch":
-        scheduler = batch_based_WarmupCosineLR_step(optimizer, warmup_steps=args.warmup_batch, total_steps=args.epoch_num * len(train_loader))
-    else:
-        raise ValueError("Invalid warmup choice")
+    # if args.warmup_choice == "no":
+    #     pass
+    # elif args.warmup_choice == "epoch":
+    #     scheduler = epoch_based_WarmupCosineLR(optimizer, warmup_epochs=args.warmup_epoch, total_epochs=args.epoch_num)
+    # elif args.warmup_choice == "batch":
+    #     scheduler = batch_based_WarmupCosineLR_step(optimizer, warmup_steps=args.warmup_batch, total_steps=args.epoch_num * len(train_loader))
+    # else:
+    #     raise ValueError("Invalid warmup choice")
 
     optimal_loss = args.loss_threshold
     for epoch_id in range(args.start_epoch, args.epoch_num):
@@ -181,8 +191,8 @@ def main(args):
             torch.cuda.empty_cache()
             all_loss.backward()
             optimizer.step()
-            if args.warmup_choice == "batch":
-                scheduler.step()
+            # if args.warmup_choice == "batch":
+            #     scheduler.step()
 
             # information record and save model
             loss = round((all_loss.detach().clone()).cpu().item(), 4)
@@ -194,8 +204,8 @@ def main(args):
                     model.save_model(model_save_dir, f"epoch{epoch_id}_batch{i_batch+1}", save_config)
             epoch_loss += loss / len(train_loader)
 
-        if args.warmup_choice == "epoch":
-            scheduler.step()
+        # if args.warmup_choice == "epoch":
+        #     scheduler.step()
 
         logger.log("{}th epoch mean loss:{}".format(epoch_id + 1, epoch_loss))
         writer.add_scalar("Train_Loss/epoch", epoch_loss, epoch_id + 1)
@@ -236,7 +246,8 @@ if __name__ == "__main__":
     # dataset config
     parser.add_argument("--data_dir", type=str, default="data/MolPair/mol_pair")
     parser.add_argument("--template_path", type=str, default="template/template.txt")
-    parser.add_argument("--version", type=str, default="v1", choices=["v1", "v2", "v3", "v4"])
+    parser.add_argument("--value_type", type=str, default="continuous", choices=["continuous", "discrete"])
+    parser.add_argument("--property_type", type=str, default="name", choices=["name", "explanation"])
     parser.add_argument("--dataset_mode", type=str, default="main", choices=["full", "main", "expand"])
     parser.add_argument("--scaffold_hint", action="store_true")
     parser.add_argument("--max_num_pairs_per_task", type=int, default=25000)
@@ -271,10 +282,21 @@ if __name__ == "__main__":
     parser.add_argument('--smiles_model_type', type=str, default="MegaMolBART", choices=["MegaMolBART"])
     parser.add_argument("--smiles_vocab_path", type=str, default="ckpt/MegaMolBART/bart_vocab.txt")
     parser.add_argument("--smiles_emb_dim", type=int, default=256)
+    # projector config
+    parser.add_argument("--SSL_emb_dim", type=int, default=256)
+    # contrastive SSL config
+    parser.add_argument("--SSL_loss", type=str, default="EBM_NCE", choices=["EBM_NCE", "InfoNCE"])
+    parser.add_argument("--CL_neg_samples", type=int, default=1)
+    parser.add_argument("--T", type=float, default=0.1)
+    parser.add_argument('--normalize', dest='normalize', action='store_true')
+    parser.add_argument('--no_normalize', dest='normalize', action='store_false')
+    parser.set_defaults(normalize=True)
     # load config
     parser.add_argument('--text_tokenizer_dir', type=str, default='ckpt/SciBERT')
     parser.add_argument('--text_model_path', type=str, default=None)
     parser.add_argument('--mol_model_path', type=str, default='ckpt/MegaMolBART/model_weight.pth')
+    parser.add_argument('--text_projector_path', type=str, default=None)
+    parser.add_argument('--mol_projector_path', type=str, default=None)
     parser.add_argument('--fuser_path', type=str, default=None)
     # save config
     parser.add_argument("--store_dir", type=str, default="ckpt/MolEditFormer/finetune")

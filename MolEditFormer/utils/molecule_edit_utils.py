@@ -95,23 +95,109 @@ DESCRIPTION_DICT = {
 }
 
 
-HARD_THRESHOLD_DICT = {
-    101: [0.5],
-    102: [0.5],
-    103: [0.1],
-    104: [0.1],
-    105: [10],
-    106: [10],
-    107: [1],
-    108: [1],
-
-    201: [0.5, 1],
-    202: [0.5, 1],
-    203: [0.5, 1],
-    204: [0.5, 1],
-    205: [0.5, 10],
-    206: [0.5, 10],
+SOFT_THRESHOLD_DICT = {
+    "101":{
+        "logP": 0,
+    },
+    "102":{
+        "logP": 0,
+    },
+    "103":{
+        "QED": 0,
+    },
+    "104":{
+        "QED": 0,
+    },
+    "105":{
+        "TPSA": 0,
+    },
+    "106":{
+        "TPSA": 0,
+    },
+    "107":{
+        "HBA": 0
+    },
+    "108":{
+        "HBD": 0
+    },
+    "201":{
+        "logP": 0,
+        "HBA": 0,
+    },
+    "202":{
+        "logP": 0,
+        "HBA": 0,
+    },
+    "203":{
+        "logP": 0,
+        "HBD": 0,
+    },
+    "204":{
+        "logP": 0,
+        "HBD": 0,
+    },
+    "205":{
+        "logP": 0,
+        "TPSA": 0,
+    },
+    "206":{
+        "logP": 0,
+        "TPSA": 0,
+    },
 }
+
+HARD_THRESHOLD_DICT = {
+    "101":{
+        "logP": 0.5,
+    },
+    "102":{
+        "logP": 0.5,
+    },
+    "103":{
+        "QED": 0.1,
+    },
+    "104":{
+        "QED": 0.1,
+    },
+    "105":{
+        "TPSA": 10,
+    },
+    "106":{
+        "TPSA": 10,
+    },
+    "107":{
+        "HBA": 1
+    },
+    "108":{
+        "HBD": 1
+    },
+    "201":{
+        "logP": 0.5,
+        "HBA": 1,
+    },
+    "202":{
+        "logP": 0.5,
+        "HBA": 1,
+    },
+    "203":{
+        "logP": 0.5,
+        "HBD": 1,
+    },
+    "204":{
+        "logP": 0.5,
+        "HBD": 1,
+    },
+    "205":{
+        "logP": 0.5,
+        "TPSA": 10,
+    },
+    "206":{
+        "logP": 0.5,
+        "TPSA": 10,
+    },
+}
+
+
 
 
 # https://pubchem.ncbi.nlm.nih.gov/compound/5904
@@ -623,13 +709,13 @@ def evaluate_SMILES_list(SMILES_list, description):
     return answer
 
 
-def evaluate_molecular_edit_result(input_smi, output_smi, task_id, threshold_list=[0]):
+def evaluate_molecular_edit_result(input_smi, output_smi, task_id, threshold_dict={}):
     '''
     Args:
         input_smi: str # input SMILES
         output_smi: str # output SMILES
         task_id: int # pre-defined task id in DESCRIPTION_DICT above
-        threshold_list: threshold_list for each sub task
+        threshold_dict: threshold_dict for each sub task
     
     Returns:
         output: bool # success or not
@@ -649,7 +735,7 @@ def evaluate_molecular_edit_result(input_smi, output_smi, task_id, threshold_lis
     reason_list = []
     if task_id == 101:
         prop = "MolLogP"
-        threshold = threshold_list[0]
+        threshold = threshold_dict.get("logP", 0)
         input_prop = prop2func[prop](input_mol)
         output_prop = prop2func[prop](output_mol)
         if output_prop + threshold < input_prop:
@@ -659,7 +745,7 @@ def evaluate_molecular_edit_result(input_smi, output_smi, task_id, threshold_lis
     
     elif task_id == 102:
         prop = "MolLogP"
-        threshold = threshold_list[0]
+        threshold = threshold_dict.get("logP", 0)
         input_prop = prop2func[prop](input_mol)
         output_prop = prop2func[prop](output_mol)
         if output_prop > input_prop + threshold:
@@ -669,7 +755,7 @@ def evaluate_molecular_edit_result(input_smi, output_smi, task_id, threshold_lis
 
     elif task_id == 103:
         prop = "qed"
-        threshold = threshold_list[0]
+        threshold = threshold_dict.get("QED", 0)
         input_prop = prop2func[prop](input_mol)
         output_prop = prop2func[prop](output_mol)
         if output_prop > input_prop + threshold:
@@ -679,7 +765,7 @@ def evaluate_molecular_edit_result(input_smi, output_smi, task_id, threshold_lis
     
     elif task_id == 104:
         prop = "qed"
-        threshold = threshold_list[0]
+        threshold = threshold_dict.get("QED", 0)
         input_prop = prop2func[prop](input_mol)
         output_prop = prop2func[prop](output_mol)
         if output_prop + threshold < input_prop:
@@ -689,7 +775,7 @@ def evaluate_molecular_edit_result(input_smi, output_smi, task_id, threshold_lis
 
     elif task_id == 105:
         prop = "TPSA"
-        threshold = threshold_list[0]
+        threshold = threshold_dict.get("TPSA", 0)
         input_prop = prop2func[prop](input_mol)
         output_prop = prop2func[prop](output_mol)
         if output_prop + threshold < input_prop:
@@ -699,7 +785,7 @@ def evaluate_molecular_edit_result(input_smi, output_smi, task_id, threshold_lis
     
     elif task_id == 106:
         prop = "TPSA"
-        threshold = threshold_list[0]
+        threshold = threshold_dict.get("TPSA", 0)
         input_prop = prop2func[prop](input_mol)
         output_prop = prop2func[prop](output_mol)
         if output_prop > input_prop + threshold:
@@ -709,7 +795,7 @@ def evaluate_molecular_edit_result(input_smi, output_smi, task_id, threshold_lis
 
     elif task_id == 107:
         prop = "NumHAcceptors"
-        threshold = threshold_list[0]
+        threshold = threshold_dict.get("HBA", 0)
         input_prop = prop2func[prop](input_mol)
         output_prop = prop2func[prop](output_mol)
         if output_prop > input_prop + threshold:
@@ -719,7 +805,7 @@ def evaluate_molecular_edit_result(input_smi, output_smi, task_id, threshold_lis
 
     elif task_id == 108:
         prop = "NumHDonors"
-        threshold = threshold_list[0]
+        threshold = threshold_dict.get("HBD", 0)
         input_prop = prop2func[prop](input_mol)
         output_prop = prop2func[prop](output_mol)
         if output_prop > input_prop + threshold:
@@ -728,8 +814,8 @@ def evaluate_molecular_edit_result(input_smi, output_smi, task_id, threshold_lis
             return False, "not enough high HBD caused failure"
 
     elif task_id == 201:
-        result_01, reason_01 = evaluate_molecular_edit_result(input_smi, output_smi, task_id=101, threshold_list=[threshold_list[0]])
-        result_02, reason_02 = evaluate_molecular_edit_result(input_smi, output_smi, task_id=107, threshold_list=[threshold_list[1]])
+        result_01, reason_01 = evaluate_molecular_edit_result(input_smi, output_smi, task_id=101, threshold_dict=threshold_dict)
+        result_02, reason_02 = evaluate_molecular_edit_result(input_smi, output_smi, task_id=107, threshold_dict=threshold_dict)
         if result_01 and result_02:
             return True, "success"
         else:
@@ -737,8 +823,8 @@ def evaluate_molecular_edit_result(input_smi, output_smi, task_id, threshold_lis
             return False, " ".join(reason_list) + " caused failure"
 
     elif task_id == 202:
-        result_01, reason_01 = evaluate_molecular_edit_result(input_smi, output_smi, task_id=102, threshold_list=[threshold_list[0]])
-        result_02, reason_02 = evaluate_molecular_edit_result(input_smi, output_smi, task_id=107, threshold_list=[threshold_list[1]])
+        result_01, reason_01 = evaluate_molecular_edit_result(input_smi, output_smi, task_id=102, threshold_dict=threshold_dict)
+        result_02, reason_02 = evaluate_molecular_edit_result(input_smi, output_smi, task_id=107, threshold_dict=threshold_dict)
         if result_01 and result_02:
             return True, "success"
         else:
@@ -746,8 +832,8 @@ def evaluate_molecular_edit_result(input_smi, output_smi, task_id, threshold_lis
             return False, " ".join(reason_list) + " caused failure"
 
     elif task_id == 203:
-        result_01, reason_01 = evaluate_molecular_edit_result(input_smi, output_smi, task_id=101, threshold_list=[threshold_list[0]])
-        result_02, reason_02 = evaluate_molecular_edit_result(input_smi, output_smi, task_id=108, threshold_list=[threshold_list[1]])
+        result_01, reason_01 = evaluate_molecular_edit_result(input_smi, output_smi, task_id=101, threshold_dict=threshold_dict)
+        result_02, reason_02 = evaluate_molecular_edit_result(input_smi, output_smi, task_id=108, threshold_dict=threshold_dict)
         reason_list = [reason.split("caused failure")[0].strip() for reason in [reason_01, reason_02] if reason != "success"]
         if result_01 and result_02:
             return True, "success"
@@ -756,8 +842,8 @@ def evaluate_molecular_edit_result(input_smi, output_smi, task_id, threshold_lis
             return False, " ".join(reason_list) + " caused failure"
 
     elif task_id == 204:
-        result_01, reason_01 = evaluate_molecular_edit_result(input_smi, output_smi, task_id=102, threshold_list=[threshold_list[0]])
-        result_02, reason_02 = evaluate_molecular_edit_result(input_smi, output_smi, task_id=108, threshold_list=[threshold_list[1]])
+        result_01, reason_01 = evaluate_molecular_edit_result(input_smi, output_smi, task_id=102, threshold_dict=threshold_dict)
+        result_02, reason_02 = evaluate_molecular_edit_result(input_smi, output_smi, task_id=108, threshold_dict=threshold_dict)
         if result_01 and result_02:
             return True, "success"
         else:
@@ -765,8 +851,8 @@ def evaluate_molecular_edit_result(input_smi, output_smi, task_id, threshold_lis
             return False, " ".join(reason_list) + " caused failure"
 
     elif task_id == 205:
-        result_01, reason_01 = evaluate_molecular_edit_result(input_smi, output_smi, task_id=101, threshold_list=[threshold_list[0]])
-        result_02, reason_02 = evaluate_molecular_edit_result(input_smi, output_smi, task_id=105, threshold_list=[threshold_list[1]])
+        result_01, reason_01 = evaluate_molecular_edit_result(input_smi, output_smi, task_id=101, threshold_dict=threshold_dict)
+        result_02, reason_02 = evaluate_molecular_edit_result(input_smi, output_smi, task_id=105, threshold_dict=threshold_dict)
         if result_01 and result_02:
             return True, "success"
         else:
@@ -774,8 +860,8 @@ def evaluate_molecular_edit_result(input_smi, output_smi, task_id, threshold_lis
             return False, " ".join(reason_list) + " caused failure"
 
     elif task_id == 206:
-        result_01, reason_01 = evaluate_molecular_edit_result(input_smi, output_smi, task_id=101, threshold_list=[threshold_list[0]])
-        result_02, reason_02 = evaluate_molecular_edit_result(input_smi, output_smi, task_id=106, threshold_list=[threshold_list[1]])
+        result_01, reason_01 = evaluate_molecular_edit_result(input_smi, output_smi, task_id=101, threshold_dict=threshold_dict)
+        result_02, reason_02 = evaluate_molecular_edit_result(input_smi, output_smi, task_id=106, threshold_dict=threshold_dict)
         if result_01 and result_02:
             return True, "success"
         else:

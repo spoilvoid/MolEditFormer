@@ -1,0 +1,21 @@
+python3 -m MolEditFormer.smiles_pretrain \
+    --model_mode pretrain \
+    --text_tokenizer_dir ckpt/SciBERT \
+    --mol_model_path ckpt/MegaMolBART/model_weight.pth \
+    --dataset_mode main \
+    --data_dir data/PubChemEdit_ZINC250k/v1 \
+    --value_type continuous \
+    --property_type name \
+    --batch_size 16 \
+    --mixed \
+    --scaffold_hint \
+    --template_path template/scaffold_template.txt \
+    --store_dir ckpt/MolEditFormer/pretrain \
+    --dir_name Mixed-PubChemEdit-ZINC250K-Continuous-Name-SMILE-Decoder-Oct-16-2025 \
+    --validation_ratio 0.05 \
+    --epoch_num 10 \
+    --alpha 1.0 \
+    --text_lr 2e-5 \
+    --graph_lr 2e-5 \
+    --seed 42 \
+    --gpu 0
