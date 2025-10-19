@@ -38,8 +38,9 @@ class PubChemEdit_ZINC250k(Dataset):
         self.PubchemEdit_filepath = os.path.join(self.root, "raw", "PubChemEdit.json")
         self.additional_ZINC250k_filepath = os.path.join(self.root, "raw", "additional_ZINC250k.csv")
 
-        self.processed_filepath = os.path.join(self.root, self.mode, "processed.csv")
-        os.makedirs(osp.join(self.root, self.mode), exist_ok=True)
+        processed_folder_name = f"{self.mode}_scaffold" if scaffold_hint else self.mode
+        self.processed_filepath = os.path.join(self.root, processed_folder_name, "processed.csv")
+        os.makedirs(osp.join(self.root, processed_folder_name), exist_ok=True)
         
         if osp.exists(self.processed_filepath):
             processed_df = pd.read_csv(self.processed_filepath)
