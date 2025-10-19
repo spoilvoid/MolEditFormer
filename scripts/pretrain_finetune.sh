@@ -1,0 +1,49 @@
+python3 -m MolEditFormer.smiles_pretrain \
+    --model_mode pretrain \
+    --text_tokenizer_dir ckpt/SciBERT \
+    --mol_model_path ckpt/MegaMolBART/model_weight.pth \
+    --dataset_mode main \
+    --data_dir data/PubChemEdit_ZINC250k/v2 \
+    --value_type discrete \
+    --property_type name \
+    --batch_size 16 \
+    --mixed \
+    --scaffold_hint \
+    --store_dir ckpt/MolEditFormer/pretrain \
+    --dir_name Mixed-PubChemEdit-ZINC250K-Discrete-Name-SMILE-Decoder-Oct-20-2025 \
+    --validation_ratio 0.05 \
+    --epoch_num 10 \
+    --alpha 1.0 \
+    --text_lr 2e-5 \
+    --graph_lr 2e-5 \
+    --seed 42 \
+    --gpu 0
+
+
+python3 -m MolEditFormer.smiles_finetune \
+    --log_freq 500 \
+    --model_mode finetune \
+    --text_tokenizer_dir ckpt/SciBERT \
+    --text_model_path ckpt/MolEditFormer/pretrain/Mixed-PubChemEdit-ZINC250K-Discrete-Name-SMILE-Decoder-Oct-20-2025/best_text_model.pth \
+    --mol_model_path ckpt/MolEditFormer/pretrain/Mixed-PubChemEdit-ZINC250K-Discrete-Name-SMILE-Decoder-Oct-20-2025/best_molecule_model.pth \
+    --text_projector_path ckpt/MolEditFormer/pretrain/Mixed-PubChemEdit-ZINC250K-Discrete-Name-SMILE-Decoder-Oct-20-2025/best_text2latent.pth \
+    --mol_projector_path ckpt/MolEditFormer/pretrain/Mixed-PubChemEdit-ZINC250K-Discrete-Name-SMILE-Decoder-Oct-20-2025/best_mol2latent.pth \
+    --scaffold_hint \
+    --template_path template/scaffold_template.txt \
+    --dataset_mode main \
+    --value_type discrete \
+    --property_type name \
+    --data_dir data/MolPair/mol_pair/v2 \
+    --max_num_pairs_per_task 10000 \
+    --batch_size 16 \
+    --store_dir ckpt/MolEditFormer/finetune \
+    --dir_name Mixed-MolPair-Discrete-Name-SMILE-Decoder-Oct-20-2025 \
+    --num_layers 4 \
+    --num_heads 8 \
+    --dropout 0.1 \
+    --validation_ratio 0.05 \
+    --epoch_num 20 \
+    --text_lr 2e-5 \
+    --fuser_lr 1e-4 \
+    --seed 42 \
+    --gpu 0

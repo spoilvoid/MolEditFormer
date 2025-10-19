@@ -9,7 +9,6 @@ python3 -m MolEditFormer.smiles_pretrain \
     --batch_size 16 \
     --mixed \
     --scaffold_hint \
-    --template_path template/scaffold_template.txt \
     --store_dir ckpt/MolEditFormer/pretrain \
     --dir_name Mixed-PubChemEdit-ZINC250K-Continuous-Name-SMILE-Decoder-Oct-16-2025 \
     --validation_ratio 0.05 \
