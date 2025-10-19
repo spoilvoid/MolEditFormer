@@ -531,8 +531,11 @@ def brics_scaffold_with_attachments(smiles: str, isomeric: bool=True):
     return scaffold_smi
 
 
-def get_scaffold(smiles: str) -> str:
-    return (murcko_scaffold_with_attachments(smiles) or brics_scaffold_with_attachments(smiles) or "")
+def get_scaffold(smiles: str, max_length: int = 200) -> str:
+    if len(smiles) <= max_length:
+        return (murcko_scaffold_with_attachments(smiles) or brics_scaffold_with_attachments(smiles) or "")
+    else:
+        return ""
 
 
 def get_property_label(x: float, property_name: str, level_dict: dict = LEVEL_LABELS_PROPERTY_NAME) -> str:
