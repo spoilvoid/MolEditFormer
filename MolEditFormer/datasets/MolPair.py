@@ -264,7 +264,7 @@ class MolPair_PairSmiles(Dataset):
                 if self.scaffold_hint:
                     input_smiles_scaffold = get_scaffold(row["smiles1"])
                     scaffold_pattern = r'\${scaffold}' if input_smiles_scaffold else r' \${scaffold}'
-                    task_description = re.sub(scaffold_pattern, input_smiles_scaffold, task_description)
+                    task_description = re.sub(scaffold_pattern, input_smiles_scaffold.replace("\\", "\\\\"), task_description)
                 
                 self.description_list.append(description_dict[row["smiles1"]] + " " + task_description)
                 self.input_smiles_list.append(row["smiles1"])
