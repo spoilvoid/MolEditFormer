@@ -157,6 +157,7 @@ def main(args):
 
     model_param_group = [
         {"params": model.text_model.parameters(), "lr": args.text_lr},
+        {"params": model.text2latent.parameters(), "lr": args.text_lr * args.text_lr_scale},
         {"params": model.modality_fuser.parameters(), "lr": args.fuser_lr},
     ]
     save_config = {
@@ -266,6 +267,8 @@ if __name__ == "__main__":
     parser.add_argument("--epoch_num", type=int, default=32, help="epoch number")
     parser.add_argument("--text_lr", type=float, default=2e-5)
     parser.add_argument("--fuser_lr", type=float, default=1e-4)
+    parser.add_argument("--text_lr_scale", type=float, default=1)
+    parser.add_argument("--graph_lr_scale", type=float, default=1)
     parser.add_argument("--weight_decay", type=float, default=0)
     # model config
     parser.set_defaults(repr_frozen=False)

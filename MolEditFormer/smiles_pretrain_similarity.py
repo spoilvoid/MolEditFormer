@@ -7,6 +7,9 @@ import argparse
 import numpy as np
 from tqdm import tqdm
 from multiprocessing import Pool
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+from matplotlib.font_manager import fontManager
 
 import torch
 import torch.nn as nn
@@ -107,7 +110,7 @@ def main(args):
         CL_args=CL_args,
     ).to(device)
 
-
+    model.eval()
     if args.mixed:
         mixed_config = {
             "can2can_ratio": args.can2can_ratio,
@@ -133,19 +136,73 @@ def main(args):
     else:
         raise ValueError("Invalid validation ratio")
 
-    # model_param_group = [
-    #     {"params": model.text_model.parameters(), "lr": args.text_lr},
-    #     {"params": model.molecule_model.parameters(), "lr": args.graph_lr},
-    #     {"params": model.text2latent.parameters(), "lr": args.text_lr * args.text_lr_scale},
-    #     {"params": model.mol2latent.parameters(), "lr": args.graph_lr * args.graph_lr_scale},
-    # ]
-    # save_config = {
-    #     "text_model": True,
-    #     "molecule_model": True,
-    #     "text2latent": True,
-    #     "mol2latent": True,
-    # }
-    # optimizer = optim.Adam(model_param_group, weight_decay=args.weight_decay)
+    corr_sim_list, non_corr_sim_list = [], []
+
+    for i_batch, sample_batched in tqdm(enumerate(val_loader), disable=False, total=len(val_loader)):
+        encoder_input_molecule_batched = sample_batched[0]
+        decoder_input_molecule_batched = sample_batched[1]
+        description_batched = sample_batched[2]
+
+        batch_mol_latent = model.sample_mol_latent(encoder_input_molecule_batched)
+        batch_text_latent = model.sample_text_latent(description_batched)
+
+        # Calculate cosine similarity between corresponding and non-corresponding pairs
+        batch_size = batch_mol_latent.shape[0]
+        corresponding_similarities = []
+        non_corresponding_similarities = []
+
+        for i in range(batch_size):
+            mol_latent = batch_mol_latent[i].unsqueeze(0)  # [1, dim]
+            text_latent = batch_text_latent[i].unsqueeze(0)  # [1, dim]
+            
+            # Cosine similarity for corresponding pair
+            sim_corresponding = F.cosine_similarity(mol_latent, text_latent).item()
+            corresponding_similarities.append(sim_corresponding)
+            
+            # Cosine similarity for non-corresponding pairs
+            for j in range(batch_size):
+                if i != j:
+                    sim_non_corresponding = F.cosine_similarity(mol_latent, batch_text_latent[j].unsqueeze(0)).item()
+                    non_corresponding_similarities.append(sim_non_corresponding)
+        
+        corr_sim_list.extend(corresponding_similarities)
+        non_corr_sim_list.extend(non_corresponding_similarities)
+
+        if i_batch > 100:
+            break
+
+
+    # Calculate means
+    corr_mean = np.mean(corr_sim_list)
+    non_corr_mean = np.mean(non_corr_sim_list)
+    
+    print(f"Corresponding similarities mean: {corr_mean:.4f}")
+    print(f"Non-corresponding similarities mean: {non_corr_mean:.4f}")
+    
+    plt.tight_layout()
+    
+    # Save corresponding pairs plot
+    fig1, ax1 = plt.subplots(figsize=(8, 5))
+    ax1.hist(corr_sim_list, bins=50, edgecolor='black', alpha=0.7, color='blue')
+    ax1.set_title(f'aa (mean={corr_mean:.4f})')
+    ax1.set_xlabel('aa')
+    ax1.set_ylabel('aa')
+    ax1.grid(alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(osp.join("/data4/zengyu/AI4C/MolEditFormer/MolEditFormer", 'corresponding_similarity_distribution.pdf'), dpi=100)
+    plt.close(fig1)
+    
+    # Save non-corresponding pairs plot
+    fig2, ax2 = plt.subplots(figsize=(8, 5))
+    ax2.hist(non_corr_sim_list, bins=50, edgecolor='black', alpha=0.7, color='orange')
+    ax2.set_title(f'aa (mean={non_corr_mean:.4f})')
+    ax2.set_xlabel('aa')
+    ax2.set_ylabel('aa')
+    ax2.grid(alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(osp.join("/data4/zengyu/AI4C/MolEditFormer/MolEditFormer", 'non_corresponding_similarity_distribution.pdf'), dpi=100)
+    plt.close(fig2)
+
 
     # if args.warmup_choice == "no":
     #     pass
@@ -155,37 +212,6 @@ def main(args):
     #     scheduler = batch_based_WarmupCosineLR_step(optimizer, warmup_steps=args.warmup_batch, total_steps=args.epoch_num * len(train_loader))
     # else:
     #     raise ValueError("Invalid warmup choice")
-
-    model.eval()
-    val_loss = 0.0
-    input_smiles_list, reconstruct_smiles_list = [], []
-    for i_batch, sample_batched in tqdm(enumerate(val_loader), disable=False, total=len(val_loader)):
-        encoder_input_molecule_batched = sample_batched[0]
-        decoder_input_molecule_batched = sample_batched[1]
-        description_batched = sample_batched[2]
-        
-        # cl_loss, mask_loss = model(encoder_input_molecule_batched, description_batched, batch_output_molecule=decoder_input_molecule_batched)
-        # all_loss = cl_loss + args.alpha * mask_loss
-        # loss = round((all_loss.detach().clone()).cpu().item(), 4)
-        # val_loss += loss / len(val_loader)
-
-        input_smiles_list.extend(encoder_input_molecule_batched)
-        reconstruct_smiles_list.extend(model.reconstruct_molecules(encoder_input_molecule_batched))
-
-    hit_count, valid_count = 0, 0
-    with Pool(args.num_workers) as p:
-        can_input_smiles_list = list(tqdm(p.imap(get_can_smiles, input_smiles_list), total=len(input_smiles_list)))
-        can_reconstruct_smiles_list = list(tqdm(p.imap(get_can_smiles, reconstruct_smiles_list), total=len(reconstruct_smiles_list)))
-    for can_input_smiles, can_reconstruct_smiles in zip(can_input_smiles_list, can_reconstruct_smiles_list):
-        if can_reconstruct_smiles is None:
-            continue
-        valid_count += 1
-        if can_input_smiles == can_reconstruct_smiles:
-            hit_count += 1
-        else:
-            print("input_smiles:", can_input_smiles, " ,reconstruct_smiles:", can_reconstruct_smiles)
-    print("valid_count:", valid_count, " ,hit_count:", hit_count)
-    print("total_count:", len(input_smiles_list))
 
 
 if __name__ == "__main__":

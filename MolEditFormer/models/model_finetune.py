@@ -123,7 +123,7 @@ class MolEditFormer_finetune(nn.Module):
             if self.mol_args.molecule_type in ["SMILES", "all"]:
                 self.molecule_dim = self.mol_args.smiles_emb_dim
                 self.molecule_model, self.molecule_tokenizer = load_mega_mol_bart(self.mol_args.model_path, self.mol_args.vocab_path)
-                self.molecule_model_tgt = copy.deepcopy(self.molecule_model)
+                # self.molecule_model_tgt = copy.deepcopy(self.molecule_model)
 
         # load text branch
         if self.text_branch:
@@ -225,10 +225,10 @@ class MolEditFormer_finetune(nn.Module):
         molecule_embedding = self.molecule_model.encode(encode_input)
         return molecule_embedding
     
-    def encode_smiles_tgt(self, smiles_token_ids, smiles_mask):
-        encode_input = {"encoder_input": smiles_token_ids, "encoder_pad_mask": smiles_mask}
-        molecule_embedding = self.molecule_model_tgt.encode(encode_input)
-        return molecule_embedding
+    # def encode_smiles_tgt(self, smiles_token_ids, smiles_mask):
+    #     encode_input = {"encoder_input": smiles_token_ids, "encoder_pad_mask": smiles_mask}
+    #     molecule_embedding = self.molecule_model_tgt.encode(encode_input)
+    #     return molecule_embedding
 
     def encode_text_from_pretrain_model(self, text_token_ids, text_mask):
         if not self.text_branch:
@@ -291,7 +291,8 @@ class MolEditFormer_finetune(nn.Module):
             fused_molecule_embedding = self.modality_fuser(input_molecule_embedding, input_text_embedding.transpose(0, 1), input_text_mask)
             
             output_molecule_token_ids, output_molecule_mask = self.prepare_smiles_tokens(batch_output_molecule)
-            output_molecule_embedding = self.encode_smiles_tgt(output_molecule_token_ids, output_molecule_mask)
+            with torch.no_grad():
+                output_molecule_embedding = self.encode_smiles(output_molecule_token_ids, output_molecule_mask)
 
             # output_molecule_repr: [batch_size, mol_d_model]
             output_molecule_repr = mean_pooling(output_molecule_embedding, ~output_molecule_mask)

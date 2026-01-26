@@ -1,4 +1,4 @@
-python3 -m MolEditFormer.reconstruct \
+python3 -m MolEditFormer.smiles_reconstruct \
     --model_mode inference \
     --molecule_type SMILES \
     --no_text_branch \

@@ -138,7 +138,7 @@ class MolEditFormer_pretrain(nn.Module):
                 raise ValueError(f"3DGraph mol_args should at least contain {self.GRAPH3D_MOL_ARGS_RANGE}")
             elif self.mol_args.molecule_type in ["SMILES", "all"] and any(arg_name not in self.mol_args.keys() for arg_name in self.SMILES_MOL_ARGS_RANGE):
                 raise ValueError(f"SMILES mol_args should at least contain {self.SMILES_MOL_ARGS_RANGE}")
-            self.text_branch = False
+            # self.text_branch = False
         else:
             raise ValueError("Invalid mode")
 
@@ -245,6 +245,38 @@ class MolEditFormer_pretrain(nn.Module):
 
         return cl_loss, mask_loss
 
+    def sample_mol_latent(self, batch_input_molecule):
+
+        # molecule_token_ids, molecule_mask: [mol_max_seq_len, batch_size]
+        # molecule_embedding: [mol_max_seq_len, batch_size, mol_d_model]
+        if self.mol_args.molecule_type in ["SMILES", "all"]:
+            input_molecule_token_ids, input_molecule_mask = self.prepare_smiles_tokens(batch_input_molecule)
+            input_molecule_embedding = self.encode_smiles(input_molecule_token_ids, input_molecule_mask)
+            # input_molecule_repr: [batch_size, mol_d_model]
+            input_molecule_repr = mean_pooling(input_molecule_embedding, ~input_molecule_mask)
+            # molecule_latent: [batch_size, SSL_emb_dim]
+            molecule_latent = self.mol2latent(input_molecule_repr)
+
+        elif self.mol_args.molecule_type in ["2DGraph", "all"]:
+            # molecule_repr = self.encode_graph(batch_molecule)
+            pass
+        elif self.mol_args.molecule_type in ["3DGraph", "all"]:
+            pass
+
+        return molecule_latent
+    
+    def sample_text_latent(self, batch_input_text):
+        # text_token_ids, text_mask: [batch_size, text_max_seq_len]
+        # text_embedding: [batch_size, text_max_seq_len, text_d_model], text_pooled_embedding: [batch_size, text_d_model]
+        input_text_token_ids, input_text_mask = self.prepare_text_tokens(batch_input_text)
+        input_text_embedding, input_text_pooled_embedding = self.encode_text_from_pretrain_model(input_text_token_ids, input_text_mask)
+        # input_text_repr: [batch_size, text_d_model]
+        input_text_repr = mean_pooling(input_text_embedding.transpose(0, 1), input_text_mask.transpose(0, 1))
+        # text_latent: [batch_size, SSL_emb_dim]
+        text_latent = self.text2latent(input_text_repr)
+
+        return text_latent
+    
     def _calc_pretrain_loss(self, molecule_latent, text_latent, target_token_ids, target_mask, token_output):
         cl_loss = (self._calc_cl_loss(molecule_latent, text_latent) + self._calc_cl_loss(text_latent, molecule_latent)) / 2
         mask_loss = self._calc_mask_loss(target_token_ids, target_mask, token_output)
